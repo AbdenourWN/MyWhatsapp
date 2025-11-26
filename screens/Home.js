@@ -45,7 +45,7 @@ export default function Home() {
           fontSize: 12,
           fontWeight: '600',
         },
-        headerShown: true,
+        headerShown: false,
       })}
       
     >

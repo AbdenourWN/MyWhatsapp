@@ -1,5 +1,5 @@
 import { db } from '../firebaseConfig';
-import { collection, getDocs, doc, setDoc, query, where } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, query, where, onSnapshot } from 'firebase/firestore';
 
 
 export const saveUserToFirestore = async (user, displayName) => {
@@ -19,22 +19,22 @@ export const saveUserToFirestore = async (user, displayName) => {
 };
 
 
-export const getAllUsers = async (currentUserId) => {
-  try {
-    const usersRef = collection(db, "users");
+export const subscribeToUsers = (currentUserId, onUsersUpdate) => {
+  const usersRef = collection(db, "users");
+  
+  // We filter out the current user
+  const q = query(usersRef, where("uid", "!=", currentUserId));
 
-    const q = query(usersRef, where("uid", "!=", currentUserId));
-    
-    const querySnapshot = await getDocs(q);
-    
+  // onSnapshot listens for changes instantly
+  const unsubscribe = onSnapshot(q, (snapshot) => {
     const users = [];
-    querySnapshot.forEach((doc) => {
+    snapshot.forEach((doc) => {
       users.push(doc.data());
     });
-    
-    return users;
-  } catch (error) {
-    console.error("Error fetching users:", error);
-    throw error;
-  }
+    onUsersUpdate(users);
+  }, (error) => {
+    console.error("Error listening to users:", error);
+  });
+
+  return unsubscribe;
 };
