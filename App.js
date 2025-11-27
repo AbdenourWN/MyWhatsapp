@@ -8,6 +8,7 @@ import { doc, updateDoc, serverTimestamp, setDoc } from "firebase/firestore";
 
 import Home from "./screens/Home";
 import AuthStack from "./screens/AuthStack";
+import HomeStack from "./navigation/HomeStack";
 
 // Optional: Ignore generic Firebase timer warnings in Expo
 LogBox.ignoreLogs(['Setting a timer']);
@@ -76,7 +77,7 @@ export default function App() {
 
   return (
     <NavigationContainer>
-      {user ? <Home /> : <AuthStack />}
+      {user ? <HomeStack /> : <AuthStack />}
     </NavigationContainer>
   );
 }
