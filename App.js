@@ -3,15 +3,16 @@ import { NavigationContainer } from "@react-navigation/native";
 import { createStackNavigator } from "@react-navigation/stack";
 import { AppState, LogBox } from "react-native";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth, db } from "./firebaseConfig"; 
+import { auth, db } from "./firebaseConfig";
 import { doc, updateDoc, serverTimestamp, setDoc } from "firebase/firestore";
 
 import Home from "./screens/Home";
 import AuthStack from "./screens/AuthStack";
 import HomeStack from "./navigation/HomeStack";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 
 // Optional: Ignore generic Firebase timer warnings in Expo
-LogBox.ignoreLogs(['Setting a timer']);
+LogBox.ignoreLogs(["Setting a timer"]);
 
 const Stack = createStackNavigator();
 
@@ -28,10 +29,14 @@ export default function App() {
       if (currentUser) {
         const userRef = doc(db, "users", currentUser.uid);
         try {
-          await setDoc(userRef, { 
-            isOnline: true,
-            email: currentUser.email 
-          }, { merge: true });
+          await setDoc(
+            userRef,
+            {
+              isOnline: true,
+              email: currentUser.email,
+            },
+            { merge: true }
+          );
         } catch (error) {
           console.error("Error setting initial online status:", error);
         }
@@ -53,8 +58,9 @@ export default function App() {
             // We use updateDoc here as the doc should exist by now
             try {
               await updateDoc(userRef, { isOnline: true });
-            } catch (e) { console.log(e); }
-
+            } catch (e) {
+              console.log(e);
+            }
           } else if (nextAppState.match(/inactive|background/)) {
             // App went to background -> Set Offline & Last Seen
             try {
@@ -62,7 +68,9 @@ export default function App() {
                 isOnline: false,
                 lastSeen: serverTimestamp(),
               });
-            } catch (e) { console.log(e); }
+            } catch (e) {
+              console.log(e);
+            }
           }
         }
         appState.current = nextAppState;
@@ -76,8 +84,10 @@ export default function App() {
   }, []);
 
   return (
-    <NavigationContainer>
-      {user ? <HomeStack /> : <AuthStack />}
-    </NavigationContainer>
+    <KeyboardProvider>
+      <NavigationContainer>
+        {user ? <HomeStack /> : <AuthStack />}
+      </NavigationContainer>
+    </KeyboardProvider>
   );
 }

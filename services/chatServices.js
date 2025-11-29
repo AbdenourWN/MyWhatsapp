@@ -1,4 +1,5 @@
-import { db } from "../firebaseConfig";
+import { uploadToCloudinary } from "../cloudinaryConfig";
+import { auth, db } from "../firebaseConfig";
 import {
   collection,
   doc,
@@ -51,7 +52,7 @@ export const sendMessage = async (roomId, message, type = "private") => {
         text: message.text || (message.image ? "📷 Image" : "🎤 Audio"),
         createdAt: serverTimestamp(),
         user: message.user,
-        read: false, 
+        read: false,
       },
     });
   } catch (error) {
@@ -166,4 +167,34 @@ export const setRecordingStatus = async (
     },
     { merge: true }
   );
+};
+
+export const createGroup = async (groupName, participantIds, imageUri) => {
+  try {
+    let groupImageUrl = null;
+
+    // 1. Upload Image if exists
+    if (imageUri) {
+      groupImageUrl = await uploadToCloudinary(imageUri, "image");
+    }
+
+    // 2. Create Group Document in "groups" collection
+    const groupRef = await addDoc(collection(db, "groups"), {
+      groupName: groupName,
+      groupImage: groupImageUrl,
+      participants: participantIds,
+      adminId: auth.currentUser.uid,
+      createdAt: serverTimestamp(),
+      lastMessage: {
+        text: "Group created",
+        createdAt: serverTimestamp(),
+        system: true,
+      },
+    });
+
+    return groupRef.id;
+  } catch (error) {
+    console.error("Error creating group:", error);
+    throw error;
+  }
 };

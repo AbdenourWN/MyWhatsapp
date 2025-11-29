@@ -14,11 +14,10 @@ import { markMessagesAsRead } from "../services/chatServices";
 export function useChatLogic(roomId, type) {
   const [messages, setMessages] = useState([]);
   const [isLoadingMessages, setIsLoadingMessages] = useState(true);
-  const [limitCount, setLimitCount] = useState(20);
+  const [limitCount, setLimitCount] = useState(40);
   const [isLoadingEarlier, setIsLoadingEarlier] = useState(false);
   const [lastCleared, setLastCleared] = useState(null);
 
-  // --- NEW STATES FOR INDICATORS ---
   const [isOtherUserTyping, setIsOtherUserTyping] = useState(false);
   const [isOtherUserRecording, setIsOtherUserRecording] = useState(false);
 

@@ -12,34 +12,34 @@ import {
   FlatList,
   TextInput,
   Image,
-  KeyboardAvoidingView,
   Platform,
+  StatusBar,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { Audio } from "expo-av";
 import moment from "moment";
 
-// Configs
-import { db, auth } from "../../firebaseConfig";
-import { uploadToCloudinary } from "../../cloudinaryConfig";
+import { auth } from "../firebaseConfig";
+import { uploadToCloudinary } from "../cloudinaryConfig";
 import {
   sendMessage,
   clearChatHistory,
   blockUser,
   setTypingStatus,
   setRecordingStatus,
-} from "../../services/chatServices";
+} from "../services/chatServices";
 
 // Components
-import ChatHeader from "../../Components/Chat/ChatHeader";
-import AudioMessage from "../../Components/Chat/AudioMessage";
-import RecordingBar from "../../Components/Chat/RecordingBar";
-import TypingIndicator from "../../Components/Chat/TypingIndicator";
+import ChatHeader from "../Components/Chat/ChatHeader";
+import AudioMessage from "../Components/Chat/AudioMessage";
+import RecordingBar from "../Components/Chat/RecordingBar";
+import TypingIndicator from "../Components/Chat/TypingIndicator";
 
 // Hooks
-import { useChatLogic } from "../../hooks/useChatLogic";
+import { useChatLogic } from "../hooks/useChatLogic";
 
 export default function Chat({ route, navigation }) {
   const { roomId, otherUser, type } = route.params;
@@ -48,12 +48,18 @@ export default function Chat({ route, navigation }) {
     isLoadingMessages,
     isOtherUserTyping,
     isOtherUserRecording,
+    loadEarlier,
+    isLoadingEarlier,
   } = useChatLogic(roomId, type);
+  const insets = useSafeAreaInsets();
 
   // State
   const [isUploading, setIsUploading] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [inputText, setInputText] = useState("");
+
+  // --- NEW: State for Full Screen Image ---
+  const [selectedImage, setSelectedImage] = useState(null);
 
   // Recording State
   const [recording, setRecording] = useState(null);
@@ -63,7 +69,6 @@ export default function Chat({ route, navigation }) {
   const durationInterval = useRef(null);
   const soundManager = useRef(null);
 
-  // Refs for Typing Logic
   const typingTimeoutRef = useRef(null);
   const isTypingRef = useRef(false);
 
@@ -74,29 +79,21 @@ export default function Chat({ route, navigation }) {
     };
   }, []);
 
-  // Handle typing status based on text changes
+  // --- TYPING LOGIC ---
   const handleTextChange = useCallback(
     async (newText) => {
       setInputText(newText);
-
-      // User is typing
       if (newText.length > 0) {
         if (!isTypingRef.current) {
           isTypingRef.current = true;
           await setTypingStatus(roomId, auth.currentUser.uid, true, type);
         }
-
-        // Reset timeout
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-
-        // Stop typing after 2 seconds of inactivity
         typingTimeoutRef.current = setTimeout(async () => {
           isTypingRef.current = false;
           await setTypingStatus(roomId, auth.currentUser.uid, false, type);
         }, 2000);
-      }
-      // User cleared the input
-      else if (newText.length === 0 && isTypingRef.current) {
+      } else if (newText.length === 0 && isTypingRef.current) {
         isTypingRef.current = false;
         await setTypingStatus(roomId, auth.currentUser.uid, false, type);
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -105,19 +102,15 @@ export default function Chat({ route, navigation }) {
     [roomId, type]
   );
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-      if (isTypingRef.current) {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (isTypingRef.current)
         setTypingStatus(roomId, auth.currentUser.uid, false, type);
-      }
     };
   }, [roomId, type]);
 
-  // --- MENU HANDLERS ---
+  // --- HANDLERS ---
   const handleClearChat = () => {
     setMenuVisible(false);
     Alert.alert("Clear Chat", "Delete all messages?", [
@@ -148,11 +141,8 @@ export default function Chat({ route, navigation }) {
     ]);
   };
 
-  // --- CHAT HANDLERS ---
   const handleSend = async () => {
     if (!inputText.trim()) return;
-
-    // Clear typing status immediately
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     isTypingRef.current = false;
     await setTypingStatus(roomId, auth.currentUser.uid, false, type);
@@ -167,8 +157,7 @@ export default function Chat({ route, navigation }) {
         avatar: auth.currentUser.photoURL,
       },
     };
-
-    setInputText(""); // Clear input
+    setInputText("");
     sendMessage(roomId, messageToSend);
   };
 
@@ -207,7 +196,7 @@ export default function Chat({ route, navigation }) {
     if (!result.canceled) handleUploadAndSend(result.assets[0].uri, "image");
   };
 
-  // --- RECORDING LOGIC ---
+  // --- RECORDING ---
   const startRecording = async () => {
     Keyboard.dismiss();
     try {
@@ -252,17 +241,23 @@ export default function Chat({ route, navigation }) {
     setRecording(null);
   };
 
-  // --- CUSTOM RENDERERS ---
   const formatTime = (date) => {
     if (!date) return "";
-    // Handle Firestore timestamp or JS Date
     const d = date.seconds ? new Date(date.seconds * 1000) : new Date(date);
     return moment(d).format("LT");
   };
 
+  const renderLoadingEarlier = () => {
+    if (!isLoadingEarlier) return null;
+    return (
+      <View style={{ paddingVertical: 20 }}>
+        <ActivityIndicator size="small" color="#56AB2F" />
+      </View>
+    );
+  };
+
   const renderMessageItem = ({ item }) => {
     const isMe = item.user._id === auth.currentUser.uid;
-
     return (
       <View
         style={[styles.messageRow, isMe ? styles.rowRight : styles.rowLeft]}
@@ -275,26 +270,23 @@ export default function Chat({ route, navigation }) {
             style={styles.avatar}
           />
         )}
-
         <View
           style={[styles.bubble, isMe ? styles.bubbleRight : styles.bubbleLeft]}
         >
+          {/* --- MODIFIED: Wrap Image in TouchableOpacity --- */}
           {item.image && (
-            <Image
-              source={{ uri: item.image }}
-              style={styles.messageImage}
-              resizeMode="cover"
-            />
+            <TouchableOpacity onPress={() => setSelectedImage(item.image)}>
+              <Image
+                source={{ uri: item.image }}
+                style={styles.messageImage}
+                resizeMode="cover"
+              />
+            </TouchableOpacity>
           )}
 
           {item.audio && (
-            <AudioMessage
-              currentMessage={item}
-              soundManager={soundManager}
-              containerStyle={{ width: 150 }}
-            />
+            <AudioMessage currentMessage={item} soundManager={soundManager} />
           )}
-
           {item.text ? (
             <Text
               style={[
@@ -305,7 +297,6 @@ export default function Chat({ route, navigation }) {
               {item.text}
             </Text>
           ) : null}
-
           <View style={styles.footerContainer}>
             <Text
               style={[
@@ -345,9 +336,9 @@ export default function Chat({ route, navigation }) {
         </View>
       ) : (
         <KeyboardAvoidingView
-          style={styles.keyboardView}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          keyboardVerticalOffset={0}
+          style={{ flex: 1 }}
+          behavior="padding"
+          keyboardVerticalOffset={-15}
         >
           <FlatList
             data={messages}
@@ -356,6 +347,9 @@ export default function Chat({ route, navigation }) {
             inverted
             contentContainerStyle={styles.flatListContent}
             keyboardShouldPersistTaps="handled"
+            onEndReached={loadEarlier}
+            onEndReachedThreshold={0.2}
+            ListFooterComponent={renderLoadingEarlier}
             ListHeaderComponent={
               <View style={{ paddingBottom: 5, paddingLeft: 10 }}>
                 <TypingIndicator
@@ -366,8 +360,9 @@ export default function Chat({ route, navigation }) {
             }
           />
 
-          {/* Input Area */}
-          <SafeAreaView edges={["bottom"]}>
+          <View
+            style={{ backgroundColor: "#f2f2f2", paddingBottom: insets.bottom }}
+          >
             {isRecording ? (
               <RecordingBar
                 onCancel={cancelRecording}
@@ -422,7 +417,7 @@ export default function Chat({ route, navigation }) {
                 )}
               </View>
             )}
-          </SafeAreaView>
+          </View>
         </KeyboardAvoidingView>
       )}
 
@@ -432,6 +427,7 @@ export default function Chat({ route, navigation }) {
         </View>
       )}
 
+      {/* --- Menu Modal --- */}
       <Modal
         visible={menuVisible}
         transparent
@@ -461,6 +457,34 @@ export default function Chat({ route, navigation }) {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {/* --- NEW: Full Screen Image Modal --- */}
+      <Modal
+        visible={!!selectedImage}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setSelectedImage(null)}
+      >
+        <View style={styles.fullImageModal}>
+          {/* Status bar darkened for immersive feel */}
+          <StatusBar backgroundColor="black" barStyle="light-content" />
+
+          <TouchableOpacity
+            style={[styles.closeImageBtn, { top: insets.top + 10 }]}
+            onPress={() => setSelectedImage(null)}
+          >
+            <MaterialCommunityIcons name="close" size={30} color="white" />
+          </TouchableOpacity>
+
+          <TouchableWithoutFeedback onPress={() => setSelectedImage(null)}>
+            <Image
+              source={{ uri: selectedImage }}
+              style={styles.fullScreenImage}
+              resizeMode="contain"
+            />
+          </TouchableWithoutFeedback>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -475,15 +499,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  keyboardView: {
-    flex: 1,
-  },
   flatListContent: {
     paddingVertical: 10,
     paddingHorizontal: 10,
   },
-
-  // Custom Message Styles
   messageRow: {
     flexDirection: "row",
     marginVertical: 4,
@@ -535,8 +554,6 @@ const styles = StyleSheet.create({
   },
   timeLeft: { color: "#aaa" },
   timeRight: { color: "#e0e0e0" },
-
-  // Input Area Styles
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -560,8 +577,6 @@ const styles = StyleSheet.create({
   iconButton: {
     padding: 5,
   },
-
-  // Existing Overlays
   loadingOverlay: {
     position: "absolute",
     top: 0,
@@ -586,4 +601,24 @@ const styles = StyleSheet.create({
   },
   menuItem: { paddingVertical: 12, paddingHorizontal: 15 },
   menuText: { fontSize: 16, color: "#333" },
+
+  // --- NEW STYLES FOR FULL IMAGE ---
+  fullImageModal: {
+    flex: 1,
+    backgroundColor: "black",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  fullScreenImage: {
+    width: "100%",
+    height: "100%",
+  },
+  closeImageBtn: {
+    position: "absolute",
+    right: 20,
+    zIndex: 10,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderRadius: 20,
+    padding: 5,
+  },
 });
