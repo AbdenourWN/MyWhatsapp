@@ -1,44 +1,40 @@
-import { CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET } from '@env';
+import { CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET } from "@env";
 
-export const uploadToCloudinary = async (uri) => {
+export const uploadToCloudinary = async (uri, type = "image") => {
   if (!uri) return null;
 
-  const url = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
+  const resourceType = type === "audio" ? "video" : "image";
 
-  // 1. Extract the file type from the URI
-  let filename = uri.split('/').pop();
+  const url = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${resourceType}/upload`;
+
+  let filename = uri.split("/").pop();
   let match = /\.(\w+)$/.exec(filename);
-  let type = match ? `image/${match[1]}` : `image`;
+  let ext = match ? match[1] : type === "audio" ? "m4a" : "jpg"; // Default extension
 
-  // 2. Create FormData
   let formData = new FormData();
-  formData.append('file', {
+  formData.append("file", {
     uri: uri,
-    name: filename,
-    type: type,
+    name: `upload.${ext}`,
+    type: type === "audio" ? "audio/m4a" : `image/${ext}`,
   });
-  formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+  formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
 
-  // 3. Send request
   try {
     let response = await fetch(url, {
-      method: 'POST',
+      method: "POST",
       body: formData,
-      headers: {
-        'content-type': 'multipart/form-data',
-      },
+      headers: { "content-type": "multipart/form-data" },
     });
 
     let data = await response.json();
-
     if (data.secure_url) {
       return data.secure_url;
     } else {
-      console.error("Cloudinary Error Data:", data);
-      throw new Error("Failed to get image URL from Cloudinary");
+      console.error("Cloudinary Error:", data);
+      throw new Error(data.error?.message || "Upload failed");
     }
   } catch (error) {
-    console.error("Cloudinary Upload Error:", error);
+    console.error("Upload Error:", error);
     throw error;
   }
 };

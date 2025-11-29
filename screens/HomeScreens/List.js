@@ -11,23 +11,23 @@ import {
   StatusBar as RNStatusBar,
   RefreshControl,
   TextInput,
+  Modal,
+  Alert,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
-// 1. FIXED: Added 'db' to imports
-import { auth, db } from "../../firebaseConfig"; 
+import { auth, db } from "../../firebaseConfig";
 import { subscribeToUsers } from "../../services/userServices";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { getChatRoomId } from "../../services/chatServices";
-// 2. FIXED: Added Firestore functions needed for Unread Count
-import { collection, query, where, onSnapshot } from "firebase/firestore"; 
+import { getChatRoomId, unblockUser } from "../../services/chatServices";
+import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
 
+// --- HELPER: TIME FORMAT ---
 const formatLastSeen = (timestamp) => {
   if (!timestamp) return "Offline";
   const date = timestamp.toDate();
   const now = new Date();
   const diffInSeconds = Math.floor((now - date) / 1000);
-
   if (diffInSeconds < 60) return "Just now";
   const diffInMinutes = Math.floor(diffInSeconds / 60);
   if (diffInMinutes < 60) return `${diffInMinutes} m ago`;
@@ -37,12 +37,13 @@ const formatLastSeen = (timestamp) => {
   return `${diffInDays} d ago`;
 };
 
-// --- EXTRACTED HEADER COMPONENT ---
+// --- HEADER COMPONENT ---
 const CustomHeader = ({
   greeting,
   searchQuery,
   setSearchQuery,
   navigation,
+  onOpenBlocked,
 }) => {
   const userPhoto = auth.currentUser?.photoURL;
   const userName = auth.currentUser?.displayName?.split(" ")[0] || "Friend";
@@ -60,19 +61,32 @@ const CustomHeader = ({
             <Text style={styles.greetingText}>{greeting},</Text>
             <Text style={styles.headerTitle}>{userName}</Text>
           </View>
-          <TouchableOpacity onPress={() => navigation.navigate("MyProfile")}>
-            {userPhoto ? (
-              <Image source={{ uri: userPhoto }} style={styles.myAvatar} />
-            ) : (
-              <View style={styles.myAvatarPlaceholder}>
-                <MaterialCommunityIcons
-                  name="account"
-                  size={20}
-                  color="#56AB2F"
-                />
-              </View>
-            )}
-          </TouchableOpacity>
+
+          <View style={{ flexDirection: "row", gap: 15 }}>
+            {/* BLOCKED USERS BUTTON */}
+            <TouchableOpacity style={styles.iconButton} onPress={onOpenBlocked}>
+              <MaterialCommunityIcons
+                name="shield-off"
+                size={24}
+                color="#fff"
+              />
+            </TouchableOpacity>
+
+            {/* PROFILE BUTTON */}
+            <TouchableOpacity onPress={() => navigation.navigate("MyProfile")}>
+              {userPhoto ? (
+                <Image source={{ uri: userPhoto }} style={styles.myAvatar} />
+              ) : (
+                <View style={styles.myAvatarPlaceholder}>
+                  <MaterialCommunityIcons
+                    name="account"
+                    size={20}
+                    color="#56AB2F"
+                  />
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.searchBarContainer}>
@@ -82,7 +96,6 @@ const CustomHeader = ({
             color="#fff"
             style={{ opacity: 0.8, marginRight: 10 }}
           />
-
           <TextInput
             style={styles.searchInput}
             placeholder="Search contacts..."
@@ -92,7 +105,6 @@ const CustomHeader = ({
             autoCapitalize="none"
             autoCorrect={false}
           />
-
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery("")}>
               <MaterialCommunityIcons
@@ -109,48 +121,38 @@ const CustomHeader = ({
   );
 };
 
-// --- USER ITEM COMPONENT ---
+// --- STANDARD USER ITEM ---
 const UserItem = ({ item, navigation }) => {
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     let unsubscribe;
-    
     const fetchUnread = async () => {
-      // Get Room ID
       const roomId = await getChatRoomId(auth.currentUser.uid, item.uid);
-      
-      const messagesRef = collection(db, 'chats', roomId, 'messages');
-      
-      // LISTEN for unread messages
+      const messagesRef = collection(db, "chats", roomId, "messages");
       const q = query(
         messagesRef,
-        where("user._id", "!=", auth.currentUser.uid), // Message from them
-        where("received", "==", false) // Not seen yet
+        where("user._id", "!=", auth.currentUser.uid),
+        where("received", "==", false)
       );
-
-      unsubscribe = onSnapshot(q, (snapshot) => {
-        setUnreadCount(snapshot.size);
-      }, (error) => {
-        console.log("Unread Count Error (Check Indexes):", error);
-      });
+      unsubscribe = onSnapshot(
+        q,
+        (snapshot) => setUnreadCount(snapshot.size),
+        () => {}
+      );
     };
-
     fetchUnread();
-    return () => { if (unsubscribe) unsubscribe(); };
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [item.uid]);
 
   const handlePress = async () => {
     const roomId = await getChatRoomId(auth.currentUser.uid, item.uid);
-    navigation.navigate("Chat", {
-      roomId: roomId,
-      otherUser: item,
-      type: "private",
-    });
+    navigation.navigate("Chat", { roomId, otherUser: item, type: "private" });
   };
 
   const isOnline = item.isOnline === true;
-  const statusColor = isOnline ? "#56AB2F" : "#888";
 
   return (
     <TouchableOpacity style={styles.userCard} onPress={handlePress}>
@@ -170,19 +172,21 @@ const UserItem = ({ item, navigation }) => {
           <Text style={styles.displayName}>
             {item.displayName || "Unknown"}
           </Text>
-
-          {/* Unread Badge OR Timestamp */}
           {unreadCount > 0 ? (
             <View style={styles.unreadBadge}>
               <Text style={styles.unreadText}>{unreadCount}</Text>
             </View>
           ) : (
-            <Text style={[styles.timestamp, { color: statusColor }]}>
+            <Text
+              style={[
+                styles.timestamp,
+                { color: isOnline ? "#56AB2F" : "#888" },
+              ]}
+            >
               {isOnline ? "Online" : formatLastSeen(item.lastSeen)}
             </Text>
           )}
         </View>
-
         <Text
           style={[styles.email, unreadCount > 0 && styles.boldText]}
           numberOfLines={1}
@@ -194,16 +198,42 @@ const UserItem = ({ item, navigation }) => {
   );
 };
 
-// --- MAIN LIST COMPONENT ---
+// --- BLOCKED USER ITEM  ---
+const BlockedUserItem = ({ item, onUnblock }) => {
+  return (
+    <View style={styles.blockedCard}>
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <Image
+          source={{ uri: item.photoURL || "https://via.placeholder.com/50" }}
+          style={styles.smallAvatar}
+        />
+        <Text style={styles.blockedName}>{item.displayName}</Text>
+      </View>
+      <TouchableOpacity
+        style={styles.unblockBtn}
+        onPress={() => onUnblock(item)}
+      >
+        <Text style={styles.unblockText}>Unblock</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+// --- MAIN LIST ---
 const List = ({ navigation }) => {
   const [users, setUsers] = useState([]);
+  const [myBlockList, setMyBlockList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [greeting, setGreeting] = useState("Hello");
   const [timeTicker, setTimeTicker] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const setupRealtimeListener = () => {
+  // Modal State
+  const [isBlockedModalVisible, setBlockedModalVisible] = useState(false);
+
+  // 1. Listen to Users
+  useEffect(() => {
     if (!auth.currentUser) return;
     const unsubscribe = subscribeToUsers(auth.currentUser.uid, (data) => {
       setUsers(data);
@@ -211,53 +241,72 @@ const List = ({ navigation }) => {
       setRefreshing(false);
     });
     return unsubscribe;
-  };
-
-  useEffect(() => {
-    const unsubscribe = setupRealtimeListener();
-
-    const hour = new Date().getHours();
-    if (hour < 12) setGreeting("Good Morning");
-    else if (hour < 18) setGreeting("Good Afternoon");
-    else setGreeting("Good Evening");
-
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
   }, []);
 
+  // 2. Listen to My Block List
   useEffect(() => {
-    const interval = setInterval(() => {
-      setTimeTicker((prev) => prev + 1);
-    }, 60000);
+    if (!auth.currentUser) return;
+    const myDocRef = doc(db, "users", auth.currentUser.uid);
+    const unsub = onSnapshot(myDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setMyBlockList(docSnap.data().blockedUsers || []);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Greeting & Ticker
+  useEffect(() => {
+    const h = new Date().getHours();
+    setGreeting(
+      h < 12 ? "Good Morning" : h < 18 ? "Good Afternoon" : "Good Evening"
+    );
+    const interval = setInterval(() => setTimeTicker((p) => p + 1), 60000);
     return () => clearInterval(interval);
   }, []);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1500);
+    setTimeout(() => setRefreshing(false), 1500);
   }, []);
 
-  const filteredUsers = users.filter((user) => {
-    const query = searchQuery.toLowerCase();
-    const nameMatch = user.displayName?.toLowerCase().includes(query);
-    const emailMatch = user.email?.toLowerCase().includes(query);
-    return nameMatch || emailMatch;
+  // --- FILTERS ---
+  // 1. ACTIVE USERS 
+  const activeUsers = users.filter((user) => {
+    const q = searchQuery.toLowerCase();
+    const matchesSearch =
+      (user.displayName || "").toLowerCase().includes(q) ||
+      (user.email || "").toLowerCase().includes(q);
+    const iBlockedThem = myBlockList.includes(user.uid);
+    const theyBlockedMe = user.blockedUsers?.includes(auth.currentUser.uid);
+    return matchesSearch && !iBlockedThem && !theyBlockedMe;
   });
 
-  const renderItem = ({ item }) => (
-    <UserItem item={item} navigation={navigation} />
+  // 2. BLOCKED USERS (Only people I blocked)
+  const blockedUsersList = users.filter((user) =>
+    myBlockList.includes(user.uid)
   );
 
-  if (loading) {
+  // --- ACTIONS ---
+  const handleUnblock = async (userToUnblock) => {
+    Alert.alert("Unblock User", `Unblock ${userToUnblock.displayName}?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Unblock",
+        onPress: async () => {
+          await unblockUser(auth.currentUser.uid, userToUnblock.uid);
+          // Real-time listener will auto-remove them from blocked list and add them to active list
+        },
+      },
+    ]);
+  };
+
+  if (loading)
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#56AB2F" />
       </View>
     );
-  }
 
   return (
     <View style={styles.container}>
@@ -268,14 +317,17 @@ const List = ({ navigation }) => {
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         navigation={navigation}
+        onOpenBlocked={() => setBlockedModalVisible(true)} // Open Modal
       />
 
       <FlatList
-        data={filteredUsers}
-        contentContainerStyle={{ paddingTop: 10 }}
+        data={activeUsers}
+        contentContainerStyle={{ paddingTop: 10, paddingBottom: 100 }}
         keyExtractor={(item) => item.uid}
-        extraData={[timeTicker, searchQuery]}
-        renderItem={renderItem}
+        extraData={[timeTicker, searchQuery, myBlockList]}
+        renderItem={({ item }) => (
+          <UserItem item={item} navigation={navigation} />
+        )}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -287,11 +339,49 @@ const List = ({ navigation }) => {
         ListEmptyComponent={
           <View style={styles.center}>
             <Text style={styles.emptyText}>
-              {searchQuery ? "No results found." : "No contacts found."}
+              {searchQuery ? "No results found." : "No active contacts."}
             </Text>
           </View>
         }
       />
+
+      {/* --- BLOCKED USERS MODAL --- */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={isBlockedModalVisible}
+        onRequestClose={() => setBlockedModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Blocked Users</Text>
+              <TouchableOpacity onPress={() => setBlockedModalVisible(false)}>
+                <MaterialCommunityIcons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+
+            {blockedUsersList.length === 0 ? (
+              <View style={styles.emptyModalView}>
+                <MaterialCommunityIcons
+                  name="shield-check"
+                  size={50}
+                  color="#ccc"
+                />
+                <Text style={styles.emptyText}>No blocked users.</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={blockedUsersList}
+                keyExtractor={(item) => item.uid}
+                renderItem={({ item }) => (
+                  <BlockedUserItem item={item} onUnblock={handleUnblock} />
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -299,10 +389,7 @@ const List = ({ navigation }) => {
 export default List;
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-  },
+  container: { flex: 1, backgroundColor: "#fff" },
   headerShadowContainer: {
     backgroundColor: "#fff",
     shadowColor: "#56AB2F",
@@ -328,15 +415,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-  greetingText: {
-    color: "#E8F5E9",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#fff",
+  greetingText: { color: "#E8F5E9", fontSize: 16, fontWeight: "600" },
+  headerTitle: { fontSize: 28, fontWeight: "bold", color: "#fff" },
+
+  iconButton: {
+    width: 45,
+    height: 45,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderRadius: 22.5,
   },
   myAvatar: {
     width: 45,
@@ -350,9 +438,10 @@ const styles = StyleSheet.create({
     height: 45,
     borderRadius: 22.5,
     backgroundColor: "#fff",
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
+
   searchBarContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -363,17 +452,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.3)",
   },
-  searchInput: {
-    flex: 1,
-    color: "#fff",
+  searchInput: { flex: 1, color: "#fff", fontSize: 16, paddingVertical: 5 },
+
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  emptyText: {
     fontSize: 16,
-    paddingVertical: 5,
+    color: "#888",
+    textAlign: "center",
+    marginTop: 20,
   },
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
+
+  // User Card Styles
   userCard: {
     flexDirection: "row",
     padding: 15,
@@ -387,21 +476,15 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  avatarContainer: {
-    marginRight: 15,
-  },
-  avatar: {
-    width: 55,
-    height: 55,
-    borderRadius: 27.5,
-  },
+  avatarContainer: { marginRight: 15 },
+  avatar: { width: 55, height: 55, borderRadius: 27.5 },
   placeholderAvatar: {
     width: 55,
     height: 55,
     borderRadius: 27.5,
     backgroundColor: "#e0e0e0",
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   onlineDot: {
     position: "absolute",
@@ -427,24 +510,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     alignItems: "center",
   },
-  displayName: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: "#333",
-  },
-  timestamp: {
-    fontSize: 12,
-  },
-  email: {
-    fontSize: 13,
-    color: "#888",
-  },
-  emptyText: {
-    fontSize: 16,
-    color: "#888",
-    textAlign: "center",
-    marginTop: 50,
-  },
+  displayName: { fontSize: 17, fontWeight: "700", color: "#333" },
+  timestamp: { fontSize: 12 },
+  email: { fontSize: 13, color: "#888" },
   unreadBadge: {
     backgroundColor: "#56AB2F",
     borderRadius: 10,
@@ -453,13 +521,53 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  unreadText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "bold",
+  unreadText: { color: "#fff", fontSize: 10, fontWeight: "bold" },
+  boldText: { fontWeight: "bold", color: "#000" },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
   },
-  boldText: {
-    fontWeight: "bold",
-    color: "#000",
+  modalContent: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: "80%",
   },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  modalTitle: { fontSize: 20, fontWeight: "bold", color: "#333" },
+  emptyModalView: { alignItems: "center", paddingVertical: 40 },
+
+  // Blocked Item Styles
+  blockedCard: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  smallAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 10,
+    backgroundColor: "#ccc",
+  },
+  blockedName: { fontSize: 16, fontWeight: "600", color: "#333" },
+  unblockBtn: {
+    backgroundColor: "#ffebee",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  unblockText: { color: "#d32f2f", fontWeight: "bold", fontSize: 14 },
 });

@@ -11,8 +11,11 @@ import {
   where,
   getDocs,
   writeBatch,
+  arrayUnion,
+  arrayRemove,
 } from "firebase/firestore";
 
+// --- PRIVATE CHAT ID GENERATOR ---
 export const getChatRoomId = async (currentUserId, otherUserId) => {
   const sortedIds = [currentUserId, otherUserId].sort();
   const roomId = sortedIds.join("_");
@@ -29,6 +32,7 @@ export const getChatRoomId = async (currentUserId, otherUserId) => {
   return roomId;
 };
 
+// --- SEND MESSAGE (Private & Group) ---
 export const sendMessage = async (roomId, message, type = "private") => {
   const collectionName = type === "group" ? "groups" : "chats";
   const messagesRef = collection(db, collectionName, roomId, "messages");
@@ -47,7 +51,7 @@ export const sendMessage = async (roomId, message, type = "private") => {
         text: message.text || (message.image ? "📷 Image" : "🎤 Audio"),
         createdAt: serverTimestamp(),
         user: message.user,
-        read: false,
+        read: false, 
       },
     });
   } catch (error) {
@@ -55,13 +59,17 @@ export const sendMessage = async (roomId, message, type = "private") => {
   }
 };
 
-// --- UPDATED MARK AS READ FUNCTION ---
-export const markMessagesAsRead = async (roomId, currentUserId) => {
+// --- MARK AS READ (Private & Group) ---
+export const markMessagesAsRead = async (
+  roomId,
+  currentUserId,
+  type = "private"
+) => {
+  const collectionName = type === "group" ? "groups" : "chats";
   try {
-    const messagesRef = collection(db, "chats", roomId, "messages");
-    
-    // SIMPLIFIED QUERY: Just get all messages that are not received yet.
-    // We removed the 'user._id != ...' check to avoid index crashes.
+    const messagesRef = collection(db, collectionName, roomId, "messages");
+
+    // Get all messages not received yet
     const q = query(messagesRef, where("received", "==", false));
 
     const snapshot = await getDocs(q);
@@ -72,7 +80,6 @@ export const markMessagesAsRead = async (roomId, currentUserId) => {
 
       snapshot.forEach((doc) => {
         const data = doc.data();
-        // CLIENT-SIDE FILTER: Only update messages sent by the OTHER person
         if (data.user._id !== currentUserId) {
           batch.update(doc.ref, { received: true });
           hasUpdates = true;
@@ -81,10 +88,82 @@ export const markMessagesAsRead = async (roomId, currentUserId) => {
 
       if (hasUpdates) {
         await batch.commit();
-        console.log("Marked messages as read");
       }
     }
   } catch (error) {
     console.error("Error marking messages as read:", error);
   }
+};
+
+// --- CLEAR CHAT (Private & Group) ---
+export const clearChatHistory = async (roomId, userId, type = "private") => {
+  const collectionName = type === "group" ? "groups" : "chats";
+  const roomRef = doc(db, collectionName, roomId);
+
+  await setDoc(
+    roomRef,
+    {
+      participantMetadata: {
+        [userId]: {
+          lastCleared: serverTimestamp(),
+        },
+      },
+    },
+    { merge: true }
+  );
+};
+
+// --- BLOCK USER ---
+export const blockUser = async (currentUserId, targetUserId) => {
+  const userRef = doc(db, "users", currentUserId);
+  await updateDoc(userRef, {
+    blockedUsers: arrayUnion(targetUserId),
+  });
+};
+
+export const unblockUser = async (currentUserId, targetUserId) => {
+  const userRef = doc(db, "users", currentUserId);
+  await updateDoc(userRef, {
+    blockedUsers: arrayRemove(targetUserId),
+  });
+};
+
+export const setTypingStatus = async (
+  roomId,
+  userId,
+  isTyping,
+  type = "private"
+) => {
+  const collectionName = type === "group" ? "groups" : "chats";
+  const roomRef = doc(db, collectionName, roomId);
+
+  await setDoc(
+    roomRef,
+    {
+      typing: {
+        [userId]: isTyping,
+      },
+    },
+    { merge: true }
+  );
+};
+
+export const setRecordingStatus = async (
+  roomId,
+  userId,
+  isRecording,
+  type = "private"
+) => {
+  const collectionName = type === "group" ? "groups" : "chats";
+  const roomRef = doc(db, collectionName, roomId);
+
+  await setDoc(
+    roomRef,
+    {
+      recording: {
+        [userId]: isRecording,
+      },
+    },
+    { merge: true }
+  );
 };
