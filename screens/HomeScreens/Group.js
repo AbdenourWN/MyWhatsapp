@@ -7,12 +7,65 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
+  TextInput,
+  Platform,
+  StatusBar as RNStatusBar,
+  KeyboardAvoidingView, // Ensure this is imported
 } from "react-native";
+import { StatusBar } from "expo-status-bar";
+import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { auth, db } from "../../firebaseConfig";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 
+// --- HEADER ---
+const CustomHeader = ({ searchQuery, setSearchQuery }) => {
+  return (
+    <View style={styles.headerShadowContainer}>
+      <LinearGradient
+        colors={["#A8E063", "#56AB2F"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGradient}
+      >
+        <View style={styles.topBar}>
+          <Text style={styles.headerTitle}>My Groups</Text>
+        </View>
+
+        <View style={styles.searchBarContainer}>
+          <MaterialCommunityIcons
+            name="magnify"
+            size={20}
+            color="#fff"
+            style={{ opacity: 0.8, marginRight: 10 }}
+          />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search groups..."
+            placeholderTextColor="rgba(255,255,255,0.7)"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery("")}>
+              <MaterialCommunityIcons
+                name="close-circle"
+                size={20}
+                color="#fff"
+                style={{ opacity: 0.9 }}
+              />
+            </TouchableOpacity>
+          )}
+        </View>
+      </LinearGradient>
+    </View>
+  );
+};
+
+// --- LIST ITEM ---
 const GroupItem = ({ item, navigation }) => {
   const handlePress = () => {
     navigation.navigate("Chat", {
@@ -24,6 +77,16 @@ const GroupItem = ({ item, navigation }) => {
       },
       type: "group",
     });
+  };
+
+  // Format Time Helper
+  const getDisplayTime = () => {
+    if (item.lastMessage?.createdAt?.toDate) {
+      return item.lastMessage.createdAt
+        .toDate()
+        .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    return "";
   };
 
   return (
@@ -41,79 +104,153 @@ const GroupItem = ({ item, navigation }) => {
           </View>
         )}
       </View>
+
       <View style={styles.textContainer}>
-        <Text style={styles.groupName}>{item.groupName}</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.groupName}>{item.groupName}</Text>
+          <Text style={styles.timeText}>{getDisplayTime()}</Text>
+        </View>
+
         <Text style={styles.lastMsg} numberOfLines={1}>
-          {item.lastMessage?.text || "No messages yet"}
+          {item.participants?.length} Members
         </Text>
       </View>
     </TouchableOpacity>
   );
 };
 
+// --- MAIN SCREEN ---
 export default function Group({ navigation }) {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     if (!auth.currentUser) return;
+
     const groupsRef = collection(db, "groups");
     const q = query(
       groupsRef,
       where("participants", "array-contains", auth.currentUser.uid)
     );
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedGroups = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+      const fetchedGroups = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          // Calculate a sortable timestamp
+          // Priority: 1. Last Message Time, 2. Group Creation Time, 3. 0
+          sortTime: data.lastMessage?.createdAt?.toDate
+            ? data.lastMessage.createdAt.toDate().getTime()
+            : data.createdAt?.toDate
+            ? data.createdAt.toDate().getTime()
+            : 0,
+        };
+      });
+
+      // --- SORTING LOGIC (Newest First) ---
+      fetchedGroups.sort((a, b) => b.sortTime - a.sortTime);
+
       setGroups(fetchedGroups);
       setLoading(false);
     });
+
     return unsubscribe;
   }, []);
 
-  if (loading)
+  // Filter
+  const filteredGroups = groups.filter((g) =>
+    g.groupName?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  if (loading) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#56AB2F" />
       </View>
     );
+  }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Groups</Text>
-      </View>
+    <View style={styles.container}>
+      <StatusBar style="light" />
+
+      <CustomHeader searchQuery={searchQuery} setSearchQuery={setSearchQuery} />
 
       <FlatList
-        data={groups}
+        data={filteredGroups}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <GroupItem item={item} navigation={navigation} />
         )}
+        contentContainerStyle={{ paddingTop: 10, paddingBottom: 100 }}
         ListEmptyComponent={
           <View style={styles.center}>
-            <Text style={{ color: "#999", marginTop: 50 }}>No groups yet.</Text>
+            <Text style={styles.emptyText}>
+              {searchQuery ? "No groups found." : "No groups yet."}
+            </Text>
           </View>
         }
       />
 
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => navigation.navigate("CreateGroup")}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.fabContainer}
+        pointerEvents="box-none"
+        keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
       >
-        <MaterialCommunityIcons name="plus" size={30} color="#fff" />
-      </TouchableOpacity>
-    </SafeAreaView>
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => navigation.navigate("CreateGroup")}
+        >
+          <MaterialCommunityIcons name="plus" size={30} color="#fff" />
+        </TouchableOpacity>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  header: { padding: 20, borderBottomWidth: 1, borderBottomColor: "#f0f0f0" },
-  headerTitle: { fontSize: 24, fontWeight: "bold", color: "#333" },
+
+  // Header
+  headerShadowContainer: {
+    backgroundColor: "#fff",
+    elevation: 5,
+    zIndex: 100,
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
+    overflow: "hidden",
+  },
+  headerGradient: {
+    paddingTop: Platform.OS === "android" ? RNStatusBar.currentHeight + 15 : 55,
+    paddingBottom: 25,
+    paddingHorizontal: 25,
+  },
+  topBar: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  headerTitle: { fontSize: 24, fontWeight: "bold", color: "#fff" },
+
+  searchBarContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.3)",
+  },
+  searchInput: { flex: 1, color: "#fff", fontSize: 16, paddingVertical: 5 },
+
+  // Items
   card: {
     flexDirection: "row",
     padding: 15,
@@ -127,17 +264,34 @@ const styles = StyleSheet.create({
     width: 55,
     height: 55,
     borderRadius: 27.5,
-    backgroundColor: "#A8E063",
+    backgroundColor: "#f38e8eff",
     justifyContent: "center",
     alignItems: "center",
   },
   textContainer: { flex: 1 },
+
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+
   groupName: { fontSize: 16, fontWeight: "bold", color: "#333" },
+  timeText: { fontSize: 12, color: "#888" },
   lastMsg: { fontSize: 14, color: "#888" },
-  fab: {
+
+  emptyText: { color: "#999", marginTop: 50, fontSize: 16 },
+
+  // FAB Positioned inside KeyboardAvoidingView
+  fabContainer: {
     position: "absolute",
-    bottom: 20,
-    right: 20,
+    bottom: 10,
+    left: 0,
+    right: 0,
+    alignItems: "flex-end",
+    padding: 20,
+  },
+  fab: {
     width: 60,
     height: 60,
     borderRadius: 30,
@@ -145,5 +299,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    marginBottom: 10,
   },
 });

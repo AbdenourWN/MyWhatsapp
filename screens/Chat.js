@@ -46,20 +46,30 @@ export default function Chat({ route, navigation }) {
   const {
     messages,
     isLoadingMessages,
-    isOtherUserTyping,
-    isOtherUserRecording,
+    typingUsers,
+    recordingUsers,
+    headerInfo,
     loadEarlier,
     isLoadingEarlier,
   } = useChatLogic(roomId, type);
   const insets = useSafeAreaInsets();
 
+  const displayUser = headerInfo
+    ? {
+        ...otherUser,
+        displayName: headerInfo.displayName,
+        photoURL: headerInfo.photoURL,
+      }
+    : otherUser;
+
   // State
   const [isUploading, setIsUploading] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [inputText, setInputText] = useState("");
-
-  // --- NEW: State for Full Screen Image ---
   const [selectedImage, setSelectedImage] = useState(null);
+
+  // --- NEW: Clearing State to prevent flash ---
+  const [isClearing, setIsClearing] = useState(false);
 
   // Recording State
   const [recording, setRecording] = useState(null);
@@ -80,6 +90,12 @@ export default function Chat({ route, navigation }) {
   }, []);
 
   // --- TYPING LOGIC ---
+  const handleHeaderPress = () => {
+    if (type === "group") {
+      navigation.navigate("GroupSettings", { groupId: roomId });
+    }
+  };
+
   const handleTextChange = useCallback(
     async (newText) => {
       setInputText(newText);
@@ -119,8 +135,18 @@ export default function Chat({ route, navigation }) {
         text: "Clear",
         style: "destructive",
         onPress: async () => {
-          await clearChatHistory(roomId, auth.currentUser.uid);
-          navigation.goBack();
+          // 1. Hide the UI immediately
+          setIsClearing(true);
+          try {
+            // 2. Perform the async operation
+            await clearChatHistory(roomId, auth.currentUser.uid, type);
+            // 3. Navigate back
+            navigation.goBack();
+          } catch (error) {
+            console.error(error);
+            setIsClearing(false);
+            Alert.alert("Error", "Could not clear chat.");
+          }
         },
       },
     ]);
@@ -143,6 +169,7 @@ export default function Chat({ route, navigation }) {
 
   const handleSend = async () => {
     if (!inputText.trim()) return;
+
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     isTypingRef.current = false;
     await setTypingStatus(roomId, auth.currentUser.uid, false, type);
@@ -158,7 +185,8 @@ export default function Chat({ route, navigation }) {
       },
     };
     setInputText("");
-    sendMessage(roomId, messageToSend);
+
+    sendMessage(roomId, messageToSend, type);
   };
 
   const handleUploadAndSend = async (uri, mediaType, audioDuration = 0) => {
@@ -180,7 +208,7 @@ export default function Chat({ route, navigation }) {
         msg.audio = cloudUrl;
         msg.audioDuration = audioDuration;
       }
-      sendMessage(roomId, msg);
+      sendMessage(roomId, msg, type);
     } catch (error) {
       Alert.alert("Error", "Failed to send media");
     } finally {
@@ -273,7 +301,6 @@ export default function Chat({ route, navigation }) {
         <View
           style={[styles.bubble, isMe ? styles.bubbleRight : styles.bubbleLeft]}
         >
-          {/* --- MODIFIED: Wrap Image in TouchableOpacity --- */}
           {item.image && (
             <TouchableOpacity onPress={() => setSelectedImage(item.image)}>
               <Image
@@ -324,13 +351,16 @@ export default function Chat({ route, navigation }) {
     <View style={styles.container}>
       <ChatHeader
         navigation={navigation}
-        user={otherUser}
+        user={displayUser}
         onMenuPress={() => setMenuVisible(true)}
-        isTyping={isOtherUserTyping}
-        isRecording={isOtherUserRecording}
+        typingUsers={typingUsers}
+        recordingUsers={recordingUsers}
+        onHeaderPress={handleHeaderPress}
+        type={type}
       />
 
-      {isLoadingMessages ? (
+      {/* --- MODIFIED: Show Loading if initializing OR CLEARING --- */}
+      {isLoadingMessages || isClearing ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#56AB2F" />
         </View>
@@ -340,25 +370,47 @@ export default function Chat({ route, navigation }) {
           behavior="padding"
           keyboardVerticalOffset={-15}
         >
-          <FlatList
-            data={messages}
-            keyExtractor={(item) => item._id.toString()}
-            renderItem={renderMessageItem}
-            inverted
-            contentContainerStyle={styles.flatListContent}
-            keyboardShouldPersistTaps="handled"
-            onEndReached={loadEarlier}
-            onEndReachedThreshold={0.2}
-            ListFooterComponent={renderLoadingEarlier}
-            ListHeaderComponent={
-              <View style={{ paddingBottom: 5, paddingLeft: 10 }}>
-                <TypingIndicator
-                  isTyping={isOtherUserTyping}
-                  isRecording={isOtherUserRecording}
-                />
-              </View>
-            }
-          />
+          {messages.length > 0 ? (
+            <FlatList
+              data={messages}
+              keyExtractor={(item) => item._id.toString()}
+              renderItem={renderMessageItem}
+              inverted
+              contentContainerStyle={styles.flatListContent}
+              keyboardShouldPersistTaps="handled"
+              onEndReached={loadEarlier}
+              onEndReachedThreshold={0.1}
+              ListFooterComponent={renderLoadingEarlier}
+              ListHeaderComponent={
+                <View style={{ paddingBottom: 5, paddingLeft: 10 }}>
+                  <TypingIndicator
+                    typingUsers={typingUsers}
+                    recordingUsers={recordingUsers}
+                  />
+                </View>
+              }
+            />
+          ) : (
+            <View
+              style={{
+                flex: 1,
+                justifyContent: "flex-end",
+                alignItems: "center",
+                marginBottom: 20,
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 16,
+                  color: "#999",
+                  fontStyle: "italic",
+                  fontWeight: "bold",
+                }}
+              >
+                No Messages Has Been Sent Yet
+              </Text>
+            </View>
+          )}
 
           <View
             style={{ backgroundColor: "#f2f2f2", paddingBottom: insets.bottom }}
@@ -427,7 +479,6 @@ export default function Chat({ route, navigation }) {
         </View>
       )}
 
-      {/* --- Menu Modal --- */}
       <Modal
         visible={menuVisible}
         transparent
@@ -458,7 +509,6 @@ export default function Chat({ route, navigation }) {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* --- NEW: Full Screen Image Modal --- */}
       <Modal
         visible={!!selectedImage}
         transparent={true}
@@ -466,16 +516,13 @@ export default function Chat({ route, navigation }) {
         onRequestClose={() => setSelectedImage(null)}
       >
         <View style={styles.fullImageModal}>
-          {/* Status bar darkened for immersive feel */}
           <StatusBar backgroundColor="black" barStyle="light-content" />
-
           <TouchableOpacity
             style={[styles.closeImageBtn, { top: insets.top + 10 }]}
             onPress={() => setSelectedImage(null)}
           >
             <MaterialCommunityIcons name="close" size={30} color="white" />
           </TouchableOpacity>
-
           <TouchableWithoutFeedback onPress={() => setSelectedImage(null)}>
             <Image
               source={{ uri: selectedImage }}
@@ -490,19 +537,9 @@ export default function Chat({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f2f2f2",
-  },
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  flatListContent: {
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-  },
+  container: { flex: 1, backgroundColor: "#f2f2f2" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  flatListContent: { paddingVertical: 10, paddingHorizontal: 10 },
   messageRow: {
     flexDirection: "row",
     marginVertical: 4,
@@ -524,34 +561,19 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     elevation: 1,
   },
-  bubbleLeft: {
-    backgroundColor: "#fff",
-    borderBottomLeftRadius: 5,
-  },
-  bubbleRight: {
-    backgroundColor: "#56AB2F",
-    borderBottomRightRadius: 5,
-  },
-  messageText: {
-    fontSize: 16,
-  },
+  bubbleLeft: { backgroundColor: "#fff", borderBottomLeftRadius: 5 },
+  bubbleRight: { backgroundColor: "#56AB2F", borderBottomRightRadius: 5 },
+  messageText: { fontSize: 16 },
   textLeft: { color: "#000" },
   textRight: { color: "#fff" },
-  messageImage: {
-    width: 200,
-    height: 150,
-    borderRadius: 10,
-    marginBottom: 5,
-  },
+  messageImage: { width: 200, height: 150, borderRadius: 10, marginBottom: 5 },
   footerContainer: {
     flexDirection: "row",
     justifyContent: "flex-end",
     alignItems: "center",
     marginTop: 2,
   },
-  timeText: {
-    fontSize: 10,
-  },
+  timeText: { fontSize: 10 },
   timeLeft: { color: "#aaa" },
   timeRight: { color: "#e0e0e0" },
   inputContainer: {
@@ -574,9 +596,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e0e0e0",
   },
-  iconButton: {
-    padding: 5,
-  },
+  iconButton: { padding: 5 },
   loadingOverlay: {
     position: "absolute",
     top: 0,
@@ -601,18 +621,13 @@ const styles = StyleSheet.create({
   },
   menuItem: { paddingVertical: 12, paddingHorizontal: 15 },
   menuText: { fontSize: 16, color: "#333" },
-
-  // --- NEW STYLES FOR FULL IMAGE ---
   fullImageModal: {
     flex: 1,
     backgroundColor: "black",
     justifyContent: "center",
     alignItems: "center",
   },
-  fullScreenImage: {
-    width: "100%",
-    height: "100%",
-  },
+  fullScreenImage: { width: "100%", height: "100%" },
   closeImageBtn: {
     position: "absolute",
     right: 20,

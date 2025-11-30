@@ -3,6 +3,7 @@ import { createStackNavigator } from "@react-navigation/stack";
 import Home from "../screens/Home";
 import Chat from "../screens/Chat";
 import CreateGroup from "../screens/createGroup";
+import GroupSettings from "../screens/GroupSettings";
 
 const Stack = createStackNavigator();
 
@@ -18,6 +19,11 @@ export default function HomeStack() {
       <Stack.Screen
         name="CreateGroup"
         component={CreateGroup}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="GroupSettings"
+        component={GroupSettings}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

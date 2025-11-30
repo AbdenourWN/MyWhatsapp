@@ -75,7 +75,7 @@ export default function Auth({ navigation }) {
           />
 
           <View style={styles.optionsContainer}>
-            <View style={styles.checkboxContainer}>
+            {/* <View style={styles.checkboxContainer}>
               <Checkbox
                 style={styles.checkbox}
                 value={rememberMe}
@@ -83,7 +83,7 @@ export default function Auth({ navigation }) {
                 color={rememberMe ? "#4a934a" : undefined}
               />
               <Text style={styles.checkboxLabel}>Remember me</Text>
-            </View>
+            </View> */}
 
             <TouchableOpacity>
               <Text style={styles.forgotPassword}>Forgot Password?</Text>
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
   optionsContainer: {
     width: "100%",
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
     alignItems: "center",
     marginBottom: 20,
   },

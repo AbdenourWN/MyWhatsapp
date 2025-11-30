@@ -198,3 +198,43 @@ export const createGroup = async (groupName, participantIds, imageUri) => {
     throw error;
   }
 };
+
+export const updateGroupInfo = async (groupId, groupName, groupImage) => {
+  const groupRef = doc(db, "groups", groupId);
+  const data = { groupName };
+  if (groupImage) {
+    // Ideally upload to Cloudinary first if it's a new local URI
+    // For this snippet, assuming image handling is done in UI or passed as URL
+    data.groupImage = groupImage;
+  }
+  await updateDoc(groupRef, data);
+};
+
+export const leaveGroup = async (groupId, userId) => {
+  const groupRef = doc(db, "groups", groupId);
+  await updateDoc(groupRef, {
+    participants: arrayRemove(userId),
+  });
+};
+
+export const addGroupParticipants = async (groupId, newUserIds) => {
+  const groupRef = doc(db, "groups", groupId);
+  await updateDoc(groupRef, {
+    participants: arrayUnion(...newUserIds),
+  });
+};
+
+export const kickGroupParticipant = async (groupId, userId) => {
+  const groupRef = doc(db, "groups", groupId);
+  await updateDoc(groupRef, {
+    participants: arrayRemove(userId),
+  });
+};
+
+// 2. Transfer Admin Rights
+export const updateGroupAdmin = async (groupId, newAdminId) => {
+  const groupRef = doc(db, "groups", groupId);
+  await updateDoc(groupRef, {
+    adminId: newAdminId,
+  });
+};

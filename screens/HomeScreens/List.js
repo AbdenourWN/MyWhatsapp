@@ -63,7 +63,6 @@ const CustomHeader = ({
           </View>
 
           <View style={{ flexDirection: "row", gap: 15 }}>
-            {/* BLOCKED USERS BUTTON */}
             <TouchableOpacity style={styles.iconButton} onPress={onOpenBlocked}>
               <MaterialCommunityIcons
                 name="shield-off"
@@ -72,7 +71,6 @@ const CustomHeader = ({
               />
             </TouchableOpacity>
 
-            {/* PROFILE BUTTON */}
             <TouchableOpacity onPress={() => navigation.navigate("MyProfile")}>
               {userPhoto ? (
                 <Image source={{ uri: userPhoto }} style={styles.myAvatar} />
@@ -198,7 +196,7 @@ const UserItem = ({ item, navigation }) => {
   );
 };
 
-// --- BLOCKED USER ITEM  ---
+// --- BLOCKED USER ITEM ---
 const BlockedUserItem = ({ item, onUnblock }) => {
   return (
     <View style={styles.blockedCard}>
@@ -222,6 +220,7 @@ const BlockedUserItem = ({ item, onUnblock }) => {
 // --- MAIN LIST ---
 const List = ({ navigation }) => {
   const [users, setUsers] = useState([]);
+  const [chatTimestamps, setChatTimestamps] = useState({}); // Stores { userId: timestamp }
   const [myBlockList, setMyBlockList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -229,7 +228,6 @@ const List = ({ navigation }) => {
   const [timeTicker, setTimeTicker] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Modal State
   const [isBlockedModalVisible, setBlockedModalVisible] = useState(false);
 
   // 1. Listen to Users
@@ -237,8 +235,7 @@ const List = ({ navigation }) => {
     if (!auth.currentUser) return;
     const unsubscribe = subscribeToUsers(auth.currentUser.uid, (data) => {
       setUsers(data);
-      setLoading(false);
-      setRefreshing(false);
+      // Don't set loading false yet, wait for blocklist
     });
     return unsubscribe;
   }, []);
@@ -251,8 +248,43 @@ const List = ({ navigation }) => {
       if (docSnap.exists()) {
         setMyBlockList(docSnap.data().blockedUsers || []);
       }
+      setLoading(false);
     });
     return () => unsub();
+  }, []);
+
+  // 3. NEW: Listen to Active Chats for Sorting
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const chatsRef = collection(db, "chats");
+    // Query chats where I am a participant
+    const q = query(
+      chatsRef,
+      where("participants", "array-contains", auth.currentUser.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const timestamps = {};
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        // Identify the "Other User" ID
+        const otherUserId = data.participants.find(
+          (uid) => uid !== auth.currentUser.uid
+        );
+
+        // Save timestamp if it exists
+        if (otherUserId && data.lastMessage?.createdAt) {
+          timestamps[otherUserId] = data.lastMessage.createdAt
+            .toDate()
+            .getTime();
+        }
+      });
+
+      setChatTimestamps(timestamps);
+    });
+
+    return unsubscribe;
   }, []);
 
   // Greeting & Ticker
@@ -270,19 +302,35 @@ const List = ({ navigation }) => {
     setTimeout(() => setRefreshing(false), 1500);
   }, []);
 
-  // --- FILTERS ---
-  // 1. ACTIVE USERS 
-  const activeUsers = users.filter((user) => {
-    const q = searchQuery.toLowerCase();
-    const matchesSearch =
-      (user.displayName || "").toLowerCase().includes(q) ||
-      (user.email || "").toLowerCase().includes(q);
-    const iBlockedThem = myBlockList.includes(user.uid);
-    const theyBlockedMe = user.blockedUsers?.includes(auth.currentUser.uid);
-    return matchesSearch && !iBlockedThem && !theyBlockedMe;
-  });
+  // --- SORTING & FILTERING LOGIC ---
+  const getSortedUsers = () => {
+    // 1. Filter
+    const activeUsers = users.filter((user) => {
+      const q = searchQuery.toLowerCase();
+      const matchesSearch =
+        (user.displayName || "").toLowerCase().includes(q) ||
+        (user.email || "").toLowerCase().includes(q);
+      const iBlockedThem = myBlockList.includes(user.uid);
+      const theyBlockedMe = user.blockedUsers?.includes(auth.currentUser.uid);
+      return matchesSearch && !iBlockedThem && !theyBlockedMe;
+    });
 
-  // 2. BLOCKED USERS (Only people I blocked)
+    // 2. Map with Timestamp
+    const usersWithTime = activeUsers.map((user) => ({
+      ...user,
+      // If we have a chat timestamp, use it. Otherwise use 0 (far past)
+      lastInteractionTime: chatTimestamps[user.uid] || 0,
+    }));
+
+    // 3. Sort Descending
+    return usersWithTime.sort(
+      (a, b) => b.lastInteractionTime - a.lastInteractionTime
+    );
+  };
+
+  const sortedUsers = getSortedUsers();
+
+  // Filter Blocked Users for Modal
   const blockedUsersList = users.filter((user) =>
     myBlockList.includes(user.uid)
   );
@@ -295,7 +343,6 @@ const List = ({ navigation }) => {
         text: "Unblock",
         onPress: async () => {
           await unblockUser(auth.currentUser.uid, userToUnblock.uid);
-          // Real-time listener will auto-remove them from blocked list and add them to active list
         },
       },
     ]);
@@ -317,14 +364,14 @@ const List = ({ navigation }) => {
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         navigation={navigation}
-        onOpenBlocked={() => setBlockedModalVisible(true)} // Open Modal
+        onOpenBlocked={() => setBlockedModalVisible(true)}
       />
 
       <FlatList
-        data={activeUsers}
+        data={sortedUsers}
         contentContainerStyle={{ paddingTop: 10, paddingBottom: 100 }}
         keyExtractor={(item) => item.uid}
-        extraData={[timeTicker, searchQuery, myBlockList]}
+        extraData={[timeTicker, searchQuery, myBlockList, chatTimestamps]} // Re-render when chat timestamps change
         renderItem={({ item }) => (
           <UserItem item={item} navigation={navigation} />
         )}

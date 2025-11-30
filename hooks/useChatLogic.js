@@ -7,6 +7,7 @@ import {
   doc,
   where,
   limit,
+  getDoc,
 } from "firebase/firestore";
 import { db, auth } from "../firebaseConfig";
 import { markMessagesAsRead } from "../services/chatServices";
@@ -14,24 +15,59 @@ import { markMessagesAsRead } from "../services/chatServices";
 export function useChatLogic(roomId, type) {
   const [messages, setMessages] = useState([]);
   const [isLoadingMessages, setIsLoadingMessages] = useState(true);
-  const [limitCount, setLimitCount] = useState(40);
+
+  // Real-time Header Info
+  const [headerInfo, setHeaderInfo] = useState(null);
+
+  // Pagination
+  const [limitCount, setLimitCount] = useState(20);
   const [isLoadingEarlier, setIsLoadingEarlier] = useState(false);
+  const [allMessagesLoaded, setAllMessagesLoaded] = useState(false);
+
+  // Clear Chat Logic
   const [lastCleared, setLastCleared] = useState(null);
 
-  const [isOtherUserTyping, setIsOtherUserTyping] = useState(false);
-  const [isOtherUserRecording, setIsOtherUserRecording] = useState(false);
+  // Block rendering until we know the clear status ---
+  const [isMetaDataLoaded, setIsMetaDataLoaded] = useState(false);
+
+  // Typing/Recording Users
+  const [typingUsers, setTypingUsers] = useState([]);
+  const [recordingUsers, setRecordingUsers] = useState([]);
 
   const collectionName = type === "group" ? "groups" : "chats";
   const currentUserId = auth.currentUser.uid;
 
-  // 1. LISTEN TO ROOM METADATA (Typing, Recording, LastCleared)
+  // --- HELPER: Resolve UIDs to Avatars ---
+  const resolveUsers = async (uids) => {
+    if (!uids || uids.length === 0) return [];
+    const users = await Promise.all(
+      uids.map(async (uid) => {
+        const userSnap = await getDoc(doc(db, "users", uid));
+        return userSnap.exists()
+          ? { uid, avatar: userSnap.data().photoURL }
+          : { uid, avatar: null };
+      })
+    );
+    return users;
+  };
+
+  // 1. LISTEN TO ROOM METADATA
   useEffect(() => {
     const roomRef = doc(db, collectionName, roomId);
-    const unsub = onSnapshot(roomRef, (docSnap) => {
+    const unsub = onSnapshot(roomRef, async (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
 
-        // 1. Handle Last Cleared
+        // A. Handle Group Info
+        if (type === "group") {
+          setHeaderInfo({
+            displayName: data.groupName,
+            photoURL: data.groupImage,
+            participants: data.participants,
+          });
+        }
+
+        // B. Handle Last Cleared Timestamp
         if (
           data.participantMetadata &&
           data.participantMetadata[currentUserId]
@@ -39,38 +75,63 @@ export function useChatLogic(roomId, type) {
           setLastCleared(data.participantMetadata[currentUserId].lastCleared);
         }
 
-        // 2. Handle Typing Logic
-        // Check if ANYONE else is typing (useful for groups too)
+        // C. Typing & Recording Logic
         const typingMap = data.typing || {};
-        const isSomeoneElseTyping = Object.keys(typingMap).some(
+        const activeTypingUids = Object.keys(typingMap).filter(
           (uid) => uid !== currentUserId && typingMap[uid] === true
         );
-        setIsOtherUserTyping(isSomeoneElseTyping);
 
-        // 3. Handle Recording Logic
+        if (activeTypingUids.length > 0) {
+          const resolved = await resolveUsers(activeTypingUids);
+          setTypingUsers(resolved);
+        } else {
+          setTypingUsers([]);
+        }
+
         const recordingMap = data.recording || {};
-        const isSomeoneElseRecording = Object.keys(recordingMap).some(
+        const activeRecordingUids = Object.keys(recordingMap).filter(
           (uid) => uid !== currentUserId && recordingMap[uid] === true
         );
-        setIsOtherUserRecording(isSomeoneElseRecording);
-      }
-    });
-    return () => unsub();
-  }, [roomId]);
 
-  // 2. LISTEN TO MESSAGES (Existing logic...)
+        if (activeRecordingUids.length > 0) {
+          const resolved = await resolveUsers(activeRecordingUids);
+          setRecordingUsers(resolved);
+        } else {
+          setRecordingUsers([]);
+        }
+      }
+      setIsMetaDataLoaded(true);
+    });
+
+    return () => unsub();
+  }, [roomId, type]);
+
+  // 2. LISTEN TO MESSAGES
   useEffect(() => {
+    // --- CRITICAL FIX: Stop if metadata isn't ready ---
+    if (!isMetaDataLoaded) return;
+
     const messagesRef = collection(db, collectionName, roomId, "messages");
+
     let qConstraints = [orderBy("createdAt", "desc"), limit(limitCount)];
-    if (lastCleared) qConstraints.push(where("createdAt", ">", lastCleared));
+
+    if (lastCleared) {
+      qConstraints.push(where("createdAt", ">", lastCleared));
+    }
 
     const q = query(messagesRef, ...qConstraints);
+
     const unsub = onSnapshot(q, (snapshot) => {
-      // (Keep existing markAsRead logic...)
+      if (snapshot.docs.length < limitCount) {
+        setAllMessagesLoaded(true);
+      } else {
+        setAllMessagesLoaded(false);
+      }
+
       const hasUnread = snapshot.docs.some(
-        (d) => d.data().user._id !== currentUserId && !d.data().received
+        (d) => d.data().user._id !== auth.currentUser.uid && !d.data().received
       );
-      if (hasUnread) markMessagesAsRead(roomId, currentUserId, type);
+      if (hasUnread) markMessagesAsRead(roomId, auth.currentUser.uid, type);
 
       const msgs = snapshot.docs.map((doc) => {
         const data = doc.data();
@@ -86,28 +147,32 @@ export function useChatLogic(roomId, type) {
           audioDuration: data.audioDuration,
         };
       });
+
       setMessages(msgs);
       setIsLoadingMessages(false);
       setIsLoadingEarlier(false);
     });
+
     return () => unsub();
-  }, [roomId, lastCleared, limitCount]);
+  }, [roomId, limitCount, lastCleared, isMetaDataLoaded]); 
 
   const loadEarlier = () => {
-    if (isLoadingEarlier) return;
+    if (isLoadingEarlier || allMessagesLoaded) return;
+    if (messages.length < limitCount) {
+      setAllMessagesLoaded(true);
+      return;
+    }
     setIsLoadingEarlier(true);
     setLimitCount((prev) => prev + 20);
   };
 
-  const canLoadMore = messages.length > 0 && messages.length >= limitCount;
-
   return {
     messages,
     isLoadingMessages,
+    typingUsers,
+    recordingUsers,
+    headerInfo,
     loadEarlier,
     isLoadingEarlier,
-    canLoadMore,
-    isOtherUserTyping, 
-    isOtherUserRecording, 
   };
 }
