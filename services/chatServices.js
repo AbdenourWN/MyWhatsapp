@@ -40,6 +40,7 @@ export const sendMessage = async (roomId, message, type = "private") => {
   const roomRef = doc(db, collectionName, roomId);
 
   try {
+    // 1. Add the actual message to the subcollection
     await addDoc(messagesRef, {
       ...message,
       createdAt: serverTimestamp(),
@@ -47,9 +48,25 @@ export const sendMessage = async (roomId, message, type = "private") => {
       received: false,
     });
 
+    // 2. Determine the Preview Text for the Chat List
+    let lastMessageText = "";
+
+    if (message.text && message.text.trim().length > 0) {
+      lastMessageText = message.text;
+    } else if (message.image) {
+      lastMessageText = "📷 Image";
+    } else if (message.audio) {
+      lastMessageText = "🎤 Audio";
+    } else if (message.location) {
+      lastMessageText = "📍 Location";
+    } else {
+      lastMessageText = "New Message";
+    }
+
+    // 3. Update the Room's Last Message
     await updateDoc(roomRef, {
       lastMessage: {
-        text: message.text || (message.image ? "📷 Image" : "🎤 Audio"),
+        text: lastMessageText,
         createdAt: serverTimestamp(),
         user: message.user,
         read: false,

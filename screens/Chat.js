@@ -20,6 +20,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { Audio } from "expo-av";
+import * as Location from "expo-location";
 import moment from "moment";
 
 import { auth } from "../firebaseConfig";
@@ -37,6 +38,7 @@ import ChatHeader from "../Components/Chat/ChatHeader";
 import AudioMessage from "../Components/Chat/AudioMessage";
 import RecordingBar from "../Components/Chat/RecordingBar";
 import TypingIndicator from "../Components/Chat/TypingIndicator";
+import LocationMessage from "../Components/Chat/LocationMessage";
 
 // Hooks
 import { useChatLogic } from "../hooks/useChatLogic";
@@ -64,12 +66,13 @@ export default function Chat({ route, navigation }) {
 
   // State
   const [isUploading, setIsUploading] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [inputText, setInputText] = useState("");
   const [selectedImage, setSelectedImage] = useState(null);
 
-  // --- NEW: Clearing State to prevent flash ---
-  const [isClearing, setIsClearing] = useState(false);
+  // --- NEW: Attachment Menu State ---
+  const [attachmentVisible, setAttachmentVisible] = useState(false);
 
   // Recording State
   const [recording, setRecording] = useState(null);
@@ -78,7 +81,6 @@ export default function Chat({ route, navigation }) {
 
   const durationInterval = useRef(null);
   const soundManager = useRef(null);
-
   const typingTimeoutRef = useRef(null);
   const isTypingRef = useRef(false);
 
@@ -126,7 +128,7 @@ export default function Chat({ route, navigation }) {
     };
   }, [roomId, type]);
 
-  // --- HANDLERS ---
+  // --- MENU HANDLERS ---
   const handleClearChat = () => {
     setMenuVisible(false);
     Alert.alert("Clear Chat", "Delete all messages?", [
@@ -135,12 +137,9 @@ export default function Chat({ route, navigation }) {
         text: "Clear",
         style: "destructive",
         onPress: async () => {
-          // 1. Hide the UI immediately
           setIsClearing(true);
           try {
-            // 2. Perform the async operation
             await clearChatHistory(roomId, auth.currentUser.uid, type);
-            // 3. Navigate back
             navigation.goBack();
           } catch (error) {
             console.error(error);
@@ -169,7 +168,6 @@ export default function Chat({ route, navigation }) {
 
   const handleSend = async () => {
     if (!inputText.trim()) return;
-
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     isTypingRef.current = false;
     await setTypingStatus(roomId, auth.currentUser.uid, false, type);
@@ -185,10 +183,77 @@ export default function Chat({ route, navigation }) {
       },
     };
     setInputText("");
-
     sendMessage(roomId, messageToSend, type);
   };
 
+  // --- LOCATION LOGIC (FIXED) ---
+  const handleSendLocation = async () => {
+    setAttachmentVisible(false); // Close menu
+    setIsUploading(true);
+    try {
+      // 1. Check Permissions
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission Denied",
+          "Allow location access in settings to share."
+        );
+        setIsUploading(false);
+        return;
+      }
+
+      // 2. Check if GPS is On
+      const isEnabled = await Location.hasServicesEnabledAsync();
+      if (!isEnabled) {
+        Alert.alert("GPS Disabled", "Please turn on your location services.");
+        setIsUploading(false);
+        return;
+      }
+
+      // 3. Get Location (Try Current, Fallback to Last Known)
+      let location = null;
+      try {
+        // Try getting fresh location with a 5-second timeout
+        location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced, // Good balance of speed/accuracy
+          timeout: 5000,
+        });
+      } catch (error) {
+        console.log("Current location timed out, trying last known...");
+        // If that fails (timeout), get the last cached location
+        location = await Location.getLastKnownPositionAsync();
+      }
+
+      if (!location) {
+        throw new Error("Unable to retrieve location");
+      }
+
+      // 4. Send Message
+      const messageToSend = {
+        _id: Math.random().toString(36).substring(7),
+        text: "",
+        location: {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        },
+        createdAt: new Date(),
+        user: {
+          _id: auth.currentUser.uid,
+          name: auth.currentUser.displayName,
+          avatar: auth.currentUser.photoURL,
+        },
+      };
+
+      sendMessage(roomId, messageToSend, type);
+    } catch (error) {
+      console.error("Location Logic Error:", error);
+      Alert.alert("Error", "Could not fetch location.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // --- MEDIA HANDLERS ---
   const handleUploadAndSend = async (uri, mediaType, audioDuration = 0) => {
     setIsUploading(true);
     try {
@@ -216,8 +281,18 @@ export default function Chat({ route, navigation }) {
     }
   };
 
-  const handlePickImage = async () => {
+  const pickImage = async () => {
+    setAttachmentVisible(false);
     let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.7,
+    });
+    if (!result.canceled) handleUploadAndSend(result.assets[0].uri, "image");
+  };
+
+  const launchCamera = async () => {
+    setAttachmentVisible(false);
+    let result = await ImagePicker.launchCameraAsync({
       mediaTypes: ["images"],
       quality: 0.7,
     });
@@ -269,6 +344,7 @@ export default function Chat({ route, navigation }) {
     setRecording(null);
   };
 
+  // --- RENDER HELPERS ---
   const formatTime = (date) => {
     if (!date) return "";
     const d = date.seconds ? new Date(date.seconds * 1000) : new Date(date);
@@ -314,6 +390,11 @@ export default function Chat({ route, navigation }) {
           {item.audio && (
             <AudioMessage currentMessage={item} soundManager={soundManager} />
           )}
+
+          {item.location && (
+            <LocationMessage location={item.location} isMe={isMe} />
+          )}
+
           {item.text ? (
             <Text
               style={[
@@ -324,6 +405,7 @@ export default function Chat({ route, navigation }) {
               {item.text}
             </Text>
           ) : null}
+
           <View style={styles.footerContainer}>
             <Text
               style={[
@@ -359,7 +441,6 @@ export default function Chat({ route, navigation }) {
         type={type}
       />
 
-      {/* --- MODIFIED: Show Loading if initializing OR CLEARING --- */}
       {isLoadingMessages || isClearing ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#56AB2F" />
@@ -370,47 +451,25 @@ export default function Chat({ route, navigation }) {
           behavior="padding"
           keyboardVerticalOffset={-15}
         >
-          {messages.length > 0 ? (
-            <FlatList
-              data={messages}
-              keyExtractor={(item) => item._id.toString()}
-              renderItem={renderMessageItem}
-              inverted
-              contentContainerStyle={styles.flatListContent}
-              keyboardShouldPersistTaps="handled"
-              onEndReached={loadEarlier}
-              onEndReachedThreshold={0.1}
-              ListFooterComponent={renderLoadingEarlier}
-              ListHeaderComponent={
-                <View style={{ paddingBottom: 5, paddingLeft: 10 }}>
-                  <TypingIndicator
-                    typingUsers={typingUsers}
-                    recordingUsers={recordingUsers}
-                  />
-                </View>
-              }
-            />
-          ) : (
-            <View
-              style={{
-                flex: 1,
-                justifyContent: "flex-end",
-                alignItems: "center",
-                marginBottom: 20,
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: 16,
-                  color: "#999",
-                  fontStyle: "italic",
-                  fontWeight: "bold",
-                }}
-              >
-                No Messages Has Been Sent Yet
-              </Text>
-            </View>
-          )}
+          <FlatList
+            data={messages}
+            keyExtractor={(item) => item._id.toString()}
+            renderItem={renderMessageItem}
+            inverted
+            contentContainerStyle={styles.flatListContent}
+            keyboardShouldPersistTaps="handled"
+            onEndReached={loadEarlier}
+            onEndReachedThreshold={0.1}
+            ListFooterComponent={renderLoadingEarlier}
+            ListHeaderComponent={
+              <View style={{ paddingBottom: 5, paddingLeft: 10 }}>
+                <TypingIndicator
+                  typingUsers={typingUsers}
+                  recordingUsers={recordingUsers}
+                />
+              </View>
+            }
+          />
 
           <View
             style={{ backgroundColor: "#f2f2f2", paddingBottom: insets.bottom }}
@@ -423,8 +482,9 @@ export default function Chat({ route, navigation }) {
               />
             ) : (
               <View style={styles.inputContainer}>
+                {/* --- ATTACHMENT BUTTON (Trigger Modal) --- */}
                 <TouchableOpacity
-                  onPress={handlePickImage}
+                  onPress={() => setAttachmentVisible(true)}
                   style={styles.iconButton}
                 >
                   <MaterialCommunityIcons
@@ -479,6 +539,7 @@ export default function Chat({ route, navigation }) {
         </View>
       )}
 
+      {/* --- MENU MODAL (Top Right) --- */}
       <Modal
         visible={menuVisible}
         transparent
@@ -509,6 +570,54 @@ export default function Chat({ route, navigation }) {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* --- ATTACHMENT MODAL (Bottom Left) --- */}
+      <Modal
+        visible={attachmentVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAttachmentVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setAttachmentVisible(false)}
+        >
+          <View style={styles.attachmentContainer}>
+            <TouchableOpacity
+              style={styles.attachmentItem}
+              onPress={launchCamera}
+            >
+              <View style={[styles.attachIcon, { backgroundColor: "#ff5252" }]}>
+                <MaterialCommunityIcons name="camera" size={24} color="#fff" />
+              </View>
+              <Text style={styles.attachText}>Camera</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.attachmentItem} onPress={pickImage}>
+              <View style={[styles.attachIcon, { backgroundColor: "#7c4dff" }]}>
+                <MaterialCommunityIcons name="image" size={24} color="#fff" />
+              </View>
+              <Text style={styles.attachText}>Gallery</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.attachmentItem}
+              onPress={handleSendLocation}
+            >
+              <View style={[styles.attachIcon, { backgroundColor: "#0f9d58" }]}>
+                <MaterialCommunityIcons
+                  name="map-marker"
+                  size={24}
+                  color="#fff"
+                />
+              </View>
+              <Text style={styles.attachText}>Location</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* --- FULL SCREEN IMAGE --- */}
       <Modal
         visible={!!selectedImage}
         transparent={true}
@@ -540,6 +649,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f2f2f2" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   flatListContent: { paddingVertical: 10, paddingHorizontal: 10 },
+
   messageRow: {
     flexDirection: "row",
     marginVertical: 4,
@@ -576,6 +686,7 @@ const styles = StyleSheet.create({
   timeText: { fontSize: 10 },
   timeLeft: { color: "#aaa" },
   timeRight: { color: "#e0e0e0" },
+
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -597,6 +708,7 @@ const styles = StyleSheet.create({
     borderColor: "#e0e0e0",
   },
   iconButton: { padding: 5 },
+
   loadingOverlay: {
     position: "absolute",
     top: 0,
@@ -608,7 +720,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 200,
   },
-  modalOverlay: { flex: 1 },
+
+  modalOverlay: { flex: 1, backgroundColor: "transparent" }, // Transparent to allow clicking out
+
+  // Menu Modal (Top Right)
   menuContainer: {
     position: "absolute",
     top: 50,
@@ -621,6 +736,35 @@ const styles = StyleSheet.create({
   },
   menuItem: { paddingVertical: 12, paddingHorizontal: 15 },
   menuText: { fontSize: 16, color: "#333" },
+
+  // Attachment Modal (Bottom Left)
+  attachmentContainer: {
+    position: "absolute",
+    bottom: 80, // Positioned above the input bar
+    left: 20,
+    backgroundColor: "#fff",
+    borderRadius: 15,
+    padding: 20,
+    elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    width: 150,
+    gap: 15,
+  },
+  attachmentItem: { flexDirection: "row", alignItems: "center" },
+  attachIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+  },
+  attachText: { fontSize: 16, fontWeight: "500", color: "#333" },
+
+  // Full Screen Image
   fullImageModal: {
     flex: 1,
     backgroundColor: "black",

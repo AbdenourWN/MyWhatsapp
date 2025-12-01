@@ -227,7 +227,6 @@ export default function GroupSettings({ route, navigation }) {
 
   return (
     <View style={styles.container}>
-      {/* --- GREEN GRADIENT HEADER --- */}
       <LinearGradient
         colors={["#A8E063", "#56AB2F"]}
         style={[styles.header, { paddingTop: 60 }]}

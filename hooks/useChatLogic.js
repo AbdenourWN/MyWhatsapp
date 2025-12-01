@@ -145,6 +145,7 @@ export function useChatLogic(roomId, type) {
           image: data.image,
           audio: data.audio,
           audioDuration: data.audioDuration,
+          location: data.location,
         };
       });
 
