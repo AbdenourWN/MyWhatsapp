@@ -220,7 +220,7 @@ const BlockedUserItem = ({ item, onUnblock }) => {
 // --- MAIN LIST ---
 const List = ({ navigation }) => {
   const [users, setUsers] = useState([]);
-  const [chatTimestamps, setChatTimestamps] = useState({}); // Stores { userId: timestamp }
+  const [chatTimestamps, setChatTimestamps] = useState({});
   const [myBlockList, setMyBlockList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -235,7 +235,6 @@ const List = ({ navigation }) => {
     if (!auth.currentUser) return;
     const unsubscribe = subscribeToUsers(auth.currentUser.uid, (data) => {
       setUsers(data);
-      // Don't set loading false yet, wait for blocklist
     });
     return unsubscribe;
   }, []);
@@ -253,11 +252,10 @@ const List = ({ navigation }) => {
     return () => unsub();
   }, []);
 
-  // 3. NEW: Listen to Active Chats for Sorting
+  // 3. Listen to Active Chats for Sorting
   useEffect(() => {
     if (!auth.currentUser) return;
     const chatsRef = collection(db, "chats");
-    // Query chats where I am a participant
     const q = query(
       chatsRef,
       where("participants", "array-contains", auth.currentUser.uid)
@@ -268,7 +266,6 @@ const List = ({ navigation }) => {
 
       snapshot.forEach((doc) => {
         const data = doc.data();
-        // Identify the "Other User" ID
         const otherUserId = data.participants.find(
           (uid) => uid !== auth.currentUser.uid
         );
@@ -318,7 +315,6 @@ const List = ({ navigation }) => {
     // 2. Map with Timestamp
     const usersWithTime = activeUsers.map((user) => ({
       ...user,
-      // If we have a chat timestamp, use it. Otherwise use 0 (far past)
       lastInteractionTime: chatTimestamps[user.uid] || 0,
     }));
 
@@ -371,7 +367,7 @@ const List = ({ navigation }) => {
         data={sortedUsers}
         contentContainerStyle={{ paddingTop: 10, paddingBottom: 100 }}
         keyExtractor={(item) => item.uid}
-        extraData={[timeTicker, searchQuery, myBlockList, chatTimestamps]} // Re-render when chat timestamps change
+        extraData={[timeTicker, searchQuery, myBlockList, chatTimestamps]} 
         renderItem={({ item }) => (
           <UserItem item={item} navigation={navigation} />
         )}

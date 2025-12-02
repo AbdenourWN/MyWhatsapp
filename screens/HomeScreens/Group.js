@@ -10,7 +10,7 @@ import {
   TextInput,
   Platform,
   StatusBar as RNStatusBar,
-  KeyboardAvoidingView, // Ensure this is imported
+  KeyboardAvoidingView,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
@@ -140,8 +140,6 @@ export default function Group({ navigation }) {
         return {
           id: doc.id,
           ...data,
-          // Calculate a sortable timestamp
-          // Priority: 1. Last Message Time, 2. Group Creation Time, 3. 0
           sortTime: data.lastMessage?.createdAt?.toDate
             ? data.lastMessage.createdAt.toDate().getTime()
             : data.createdAt?.toDate
@@ -150,7 +148,7 @@ export default function Group({ navigation }) {
         };
       });
 
-      // --- SORTING LOGIC (Newest First) ---
+      // --- SORTING LOGIC ---
       fetchedGroups.sort((a, b) => b.sortTime - a.sortTime);
 
       setGroups(fetchedGroups);
@@ -196,7 +194,7 @@ export default function Group({ navigation }) {
       />
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
         style={styles.fabContainer}
         pointerEvents="box-none"
         keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
@@ -282,7 +280,6 @@ const styles = StyleSheet.create({
 
   emptyText: { color: "#999", marginTop: 50, fontSize: 16 },
 
-  // FAB Positioned inside KeyboardAvoidingView
   fabContainer: {
     position: "absolute",
     bottom: 10,

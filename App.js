@@ -11,7 +11,6 @@ import AuthStack from "./screens/AuthStack";
 import HomeStack from "./navigation/HomeStack";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 
-// Optional: Ignore generic Firebase timer warnings in Expo
 LogBox.ignoreLogs(["Setting a timer"]);
 
 const Stack = createStackNavigator();
@@ -25,7 +24,7 @@ export default function App() {
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
 
-      // --- CRITICAL FIX: Set user Online immediately when app loads ---
+      // Set user Online immediately when app loads ---
       if (currentUser) {
         const userRef = doc(db, "users", currentUser.uid);
         try {
@@ -55,7 +54,6 @@ export default function App() {
             nextAppState === "active"
           ) {
             // App came to foreground -> Set Online
-            // We use updateDoc here as the doc should exist by now
             try {
               await updateDoc(userRef, { isOnline: true });
             } catch (e) {

@@ -30,8 +30,7 @@ export default function Auth({ navigation }) {
     .then((userCredential) => {
       // Signed in
       const user = userCredential.user;
-      console.log("User logged in:", user.uid);
-      // Navigation to the home screen will be handled automatically. See Step 6.
+      //console.log("User logged in:", user.uid);
     })
     .catch((error) => {
       let errorMessage = "An error occurred during login.";
