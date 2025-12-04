@@ -50,11 +50,7 @@
         "expo-build-properties",
         {
           "android": {
-            "minSdkVersion": 24,
-            "extraMavenRepos": [
-              "https://storage.zego.im/maven",
-              "https://www.jitpack.io"
-            ]
+            "minSdkVersion": 24
           }
         }
       ],
@@ -68,6 +64,12 @@
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "Allow WhatsApp Clone to use your location to share with friends."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow WhatsApp to access your microphone for voice messages and calls."
         }
       ]
     ]
