@@ -154,6 +154,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: "#ddd",
+    color:"#000"
   },
   optionsContainer: {
     width: "100%",

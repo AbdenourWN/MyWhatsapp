@@ -4,6 +4,9 @@ import Home from "../screens/Home";
 import Chat from "../screens/Chat";
 import CreateGroup from "../screens/createGroup";
 import GroupSettings from "../screens/GroupSettings";
+import CallScreen from "../screens/CallScreen";
+import IncomingCallScreen from "../screens/IncomingCallScreen";
+import GroupCallScreen from "../screens/GroupCallScreen";
 
 const Stack = createStackNavigator();
 
@@ -24,6 +27,21 @@ export default function HomeStack() {
       <Stack.Screen
         name="GroupSettings"
         component={GroupSettings}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="CallScreen"
+        component={CallScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="IncomingCallScreen"
+        component={IncomingCallScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="GroupCallScreen"
+        component={GroupCallScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

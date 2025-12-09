@@ -12,7 +12,6 @@ import {
   FlatList,
   TextInput,
   Image,
-  Platform,
   StatusBar,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
@@ -31,6 +30,7 @@ import {
   blockUser,
   setTypingStatus,
   setRecordingStatus,
+  listenForIncomingCalls,
 } from "../services/chatServices";
 
 // Components
@@ -42,6 +42,7 @@ import LocationMessage from "../Components/Chat/LocationMessage";
 
 // Hooks
 import { useChatLogic } from "../hooks/useChatLogic";
+import CallMessage from "../Components/Chat/CallMessage";
 
 export default function Chat({ route, navigation }) {
   const { roomId, otherUser, type } = route.params;
@@ -70,8 +71,6 @@ export default function Chat({ route, navigation }) {
   const [menuVisible, setMenuVisible] = useState(false);
   const [inputText, setInputText] = useState("");
   const [selectedImage, setSelectedImage] = useState(null);
-
-  // --- NEW: Attachment Menu State ---
   const [attachmentVisible, setAttachmentVisible] = useState(false);
 
   // Recording State
@@ -186,23 +185,18 @@ export default function Chat({ route, navigation }) {
     sendMessage(roomId, messageToSend, type);
   };
 
-  // --- LOCATION LOGIC (FIXED) ---
+  // --- LOCATION LOGIC ---
   const handleSendLocation = async () => {
     setAttachmentVisible(false); // Close menu
     setIsUploading(true);
     try {
-      // 1. Check Permissions
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert(
-          "Permission Denied",
-          "Allow location access in settings to share."
-        );
+        Alert.alert("Permission Denied", "Allow location access to share.");
         setIsUploading(false);
         return;
       }
 
-      // 2. Check if GPS is On
       const isEnabled = await Location.hasServicesEnabledAsync();
       if (!isEnabled) {
         Alert.alert("GPS Disabled", "Please turn on your location services.");
@@ -210,25 +204,19 @@ export default function Chat({ route, navigation }) {
         return;
       }
 
-      // 3. Get Location (Try Current, Fallback to Last Known)
       let location = null;
       try {
-        // Try getting fresh location with a 5-second timeout
         location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced, // Good balance of speed/accuracy
+          accuracy: Location.Accuracy.Balanced,
           timeout: 5000,
         });
       } catch (error) {
-        console.log("Current location timed out, trying last known...");
-        // If that fails (timeout), get the last cached location
+        console.log("Location timeout, using last known...");
         location = await Location.getLastKnownPositionAsync();
       }
 
-      if (!location) {
-        throw new Error("Unable to retrieve location");
-      }
+      if (!location) throw new Error("Unable to retrieve location");
 
-      // 4. Send Message
       const messageToSend = {
         _id: Math.random().toString(36).substring(7),
         text: "",
@@ -246,7 +234,7 @@ export default function Chat({ route, navigation }) {
 
       sendMessage(roomId, messageToSend, type);
     } catch (error) {
-      console.error("Location Logic Error:", error);
+      console.error("Location Error:", error);
       Alert.alert("Error", "Could not fetch location.");
     } finally {
       setIsUploading(false);
@@ -377,34 +365,44 @@ export default function Chat({ route, navigation }) {
         <View
           style={[styles.bubble, isMe ? styles.bubbleRight : styles.bubbleLeft]}
         >
-          {item.image && (
-            <TouchableOpacity onPress={() => setSelectedImage(item.image)}>
-              <Image
-                source={{ uri: item.image }}
-                style={styles.messageImage}
-                resizeMode="cover"
-              />
-            </TouchableOpacity>
-          )}
+          {item.callInfo ? (
+            <CallMessage item={item} isMe={isMe} />
+          ) : (
+            // 2. STANDARD MESSAGES (Text, Image, Audio, Location)
+            <>
+              {item.image && (
+                <TouchableOpacity onPress={() => setSelectedImage(item.image)}>
+                  <Image
+                    source={{ uri: item.image }}
+                    style={styles.messageImage}
+                    resizeMode="cover"
+                  />
+                </TouchableOpacity>
+              )}
 
-          {item.audio && (
-            <AudioMessage currentMessage={item} soundManager={soundManager} />
-          )}
+              {item.audio && (
+                <AudioMessage
+                  currentMessage={item}
+                  soundManager={soundManager}
+                />
+              )}
 
-          {item.location && (
-            <LocationMessage location={item.location} isMe={isMe} />
-          )}
+              {item.location && (
+                <LocationMessage location={item.location} isMe={isMe} />
+              )}
 
-          {item.text ? (
-            <Text
-              style={[
-                styles.messageText,
-                isMe ? styles.textRight : styles.textLeft,
-              ]}
-            >
-              {item.text}
-            </Text>
-          ) : null}
+              {item.text ? (
+                <Text
+                  style={[
+                    styles.messageText,
+                    isMe ? styles.textRight : styles.textLeft,
+                  ]}
+                >
+                  {item.text}
+                </Text>
+              ) : null}
+            </>
+          )}
 
           <View style={styles.footerContainer}>
             <Text
@@ -434,6 +432,7 @@ export default function Chat({ route, navigation }) {
       <ChatHeader
         navigation={navigation}
         user={displayUser}
+        chatId={roomId}
         onMenuPress={() => setMenuVisible(true)}
         typingUsers={typingUsers}
         recordingUsers={recordingUsers}
@@ -482,7 +481,6 @@ export default function Chat({ route, navigation }) {
               />
             ) : (
               <View style={styles.inputContainer}>
-                {/* --- ATTACHMENT BUTTON (Trigger Modal) --- */}
                 <TouchableOpacity
                   onPress={() => setAttachmentVisible(true)}
                   style={styles.iconButton}
@@ -539,7 +537,7 @@ export default function Chat({ route, navigation }) {
         </View>
       )}
 
-      {/* --- MENU MODAL (Top Right) --- */}
+      {/* --- MENU MODAL --- */}
       <Modal
         visible={menuVisible}
         transparent
@@ -570,7 +568,7 @@ export default function Chat({ route, navigation }) {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* --- ATTACHMENT MODAL (Bottom Left) --- */}
+      {/* --- ATTACHMENT MODAL --- */}
       <Modal
         visible={attachmentVisible}
         transparent
@@ -649,7 +647,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f2f2f2" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   flatListContent: { paddingVertical: 10, paddingHorizontal: 10 },
-
   messageRow: {
     flexDirection: "row",
     marginVertical: 4,
@@ -686,7 +683,6 @@ const styles = StyleSheet.create({
   timeText: { fontSize: 10 },
   timeLeft: { color: "#aaa" },
   timeRight: { color: "#e0e0e0" },
-
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -708,7 +704,6 @@ const styles = StyleSheet.create({
     borderColor: "#e0e0e0",
   },
   iconButton: { padding: 5 },
-
   loadingOverlay: {
     position: "absolute",
     top: 0,
@@ -720,10 +715,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 200,
   },
-
-  modalOverlay: { flex: 1, backgroundColor: "transparent" }, // Transparent to allow clicking out
-
-  // Menu Modal (Top Right)
+  modalOverlay: { flex: 1, backgroundColor: "transparent" },
   menuContainer: {
     position: "absolute",
     top: 50,
@@ -736,11 +728,9 @@ const styles = StyleSheet.create({
   },
   menuItem: { paddingVertical: 12, paddingHorizontal: 15 },
   menuText: { fontSize: 16, color: "#333" },
-
-  // Attachment Modal (Bottom Left)
   attachmentContainer: {
     position: "absolute",
-    bottom: 80, // Positioned above the input bar
+    bottom: 80,
     left: 20,
     backgroundColor: "#fff",
     borderRadius: 15,
@@ -763,8 +753,6 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   attachText: { fontSize: 16, fontWeight: "500", color: "#333" },
-
-  // Full Screen Image
   fullImageModal: {
     flex: 1,
     backgroundColor: "black",

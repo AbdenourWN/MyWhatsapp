@@ -14,6 +14,7 @@ import {
   writeBatch,
   arrayUnion,
   arrayRemove,
+  onSnapshot,
 } from "firebase/firestore";
 
 // --- PRIVATE CHAT ID GENERATOR ---
@@ -220,8 +221,6 @@ export const updateGroupInfo = async (groupId, groupName, groupImage) => {
   const groupRef = doc(db, "groups", groupId);
   const data = { groupName };
   if (groupImage) {
-    // Ideally upload to Cloudinary first if it's a new local URI
-    // For this snippet, assuming image handling is done in UI or passed as URL
     data.groupImage = groupImage;
   }
   await updateDoc(groupRef, data);
@@ -253,5 +252,167 @@ export const updateGroupAdmin = async (groupId, newAdminId) => {
   const groupRef = doc(db, "groups", groupId);
   await updateDoc(groupRef, {
     adminId: newAdminId,
+  });
+};
+
+/* Calls */
+export const initiateCallSignal = async (
+  roomId,
+  callType,
+  currentUser,
+  type = "private"
+) => {
+  const collectionName = type === "group" ? "groups" : "chats";
+  const roomRef = doc(db, collectionName, roomId);
+  const callId = `${roomId}_${Date.now()}`;
+
+  await setDoc(
+    roomRef,
+    {
+      callActive: true,
+      callRoomId: callId,
+      callType: callType, // 'video' or 'audio'
+      callerName: currentUser?.displayName || "User",
+      callerId: currentUser?.uid,
+      callStartTime: serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return callId;
+};
+
+export const listenForIncomingCalls = (
+  roomId,
+  currentUserId,
+  onIncomingCall,
+  type = "private"
+) => {
+  const collectionName = type === "group" ? "groups" : "chats";
+  const roomRef = doc(db, collectionName, roomId);
+
+  // Return the listener (unsubscribe function)
+  return onSnapshot(roomRef, (docSnapshot) => {
+    const data = docSnapshot.data();
+
+    // Check if a call is active and I am NOT the caller
+    if (
+      data?.callActive &&
+      data?.callRoomId &&
+      data?.callerId !== currentUserId
+    ) {
+      onIncomingCall({
+        callRoomId: data.callRoomId,
+        callType: data.callType,
+        callerName: data.callerName,
+      });
+    }
+  });
+};
+
+/**
+ * Ends the call signal in Firestore.
+ */
+export const endCallSignal = async (roomId, type = "private") => {
+  const collectionName = type === "group" ? "groups" : "chats";
+  const roomRef = doc(db, collectionName, roomId);
+
+  await updateDoc(roomRef, {
+    callActive: false,
+    callRoomId: null,
+  });
+};
+
+export const sendCallSystemMessage = async (
+  roomId,
+  callType,
+  durationSecs,
+  currentUser,
+  isGroup = false
+) => {
+  try {
+    // 1. Determine Collection: "chats" or "groups"
+    const collectionName = isGroup ? "groups" : "chats";
+
+    const messagesRef = collection(db, collectionName, roomId, "messages");
+    const roomRef = doc(db, collectionName, roomId);
+
+    // Format duration (e.g., "05:23")
+    const mins = Math.floor(durationSecs / 60);
+    const secs = durationSecs % 60;
+    const formattedDuration = `${mins}:${secs < 10 ? "0" : ""}${secs}`;
+
+    const text = `${
+      callType === "video" ? "Video" : "Voice"
+    } Call • ${formattedDuration}`;
+
+    // 2. Add Message
+    await addDoc(messagesRef, {
+      _id: Math.random().toString(36).substring(7),
+      text: text,
+      createdAt: serverTimestamp(),
+      system: true,
+      callInfo: {
+        type: callType,
+        duration: durationSecs,
+      },
+      user: {
+        _id: currentUser.uid,
+        name: currentUser.displayName,
+        avatar: currentUser.photoURL,
+      },
+      sent: true,
+      received: false,
+    });
+
+    // 3. Update Last Message
+    await updateDoc(roomRef, {
+      lastMessage: {
+        text: `📞 ${text}`,
+        createdAt: serverTimestamp(),
+        user: { _id: currentUser.uid },
+        read: false,
+      },
+      // If it's the end of a group call, clear the banner here too
+      callActive: false,
+      callRoomId: null,
+    });
+  } catch (error) {
+    console.error("Error saving call history:", error);
+  }
+};
+
+export const initiateGroupCall = async (groupId, callType, currentUser) => {
+  const callId = `${groupId}_${Date.now()}`;
+  const groupRef = doc(db, "groups", groupId);
+  const callRef = doc(db, "calls", callId);
+
+  // 1. Create the Call Document
+  await setDoc(callRef, {
+    activeParticipants: [currentUser.uid], // Start with me
+    callType: callType,
+    callActive: true,
+    roomId: groupId,
+    createdAt: serverTimestamp(),
+  });
+
+  // 2. Update Group Chat to show banner
+  await updateDoc(groupRef, {
+    callActive: true,
+    callRoomId: callId,
+    callType: callType,
+    callerName: currentUser.displayName, // Who started it
+    callerId: currentUser.uid,
+  });
+
+  return callId;
+};
+
+// --- JOIN GROUP CALL ---
+export const joinGroupCall = async (callId, currentUser) => {
+  // Add myself to the participants list
+  const callRef = doc(db, "calls", callId);
+  await updateDoc(callRef, {
+    activeParticipants: arrayUnion(currentUser.uid),
   });
 };

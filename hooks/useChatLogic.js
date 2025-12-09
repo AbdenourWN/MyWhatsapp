@@ -146,6 +146,7 @@ export function useChatLogic(roomId, type) {
           audio: data.audio,
           audioDuration: data.audioDuration,
           location: data.location,
+          callInfo: data.callInfo,
         };
       });
 

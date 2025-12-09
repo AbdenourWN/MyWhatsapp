@@ -1,19 +1,29 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image, StyleSheet } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Image,
+  StyleSheet,
+  Alert,
+} from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { auth, db } from "../../firebaseConfig";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { initiateGroupCall } from "../../services/chatServices";
 
 export default function ChatHeader({
   navigation,
   user,
+  chatId,
   onMenuPress,
-  typingUsers = [], // Expect Array
-  recordingUsers = [], // Expect Array
+  typingUsers = [],
+  recordingUsers = [],
   onHeaderPress,
   type = "private",
 }) {
   const getStatusContent = () => {
-    // 1. Priority: Recording
     if (recordingUsers.length > 0) {
       return (
         <View style={styles.statusRow}>
@@ -32,7 +42,6 @@ export default function ChatHeader({
       );
     }
 
-    // 2. Priority: Typing
     if (typingUsers.length > 0) {
       return (
         <View style={styles.statusRow}>
@@ -51,7 +60,6 @@ export default function ChatHeader({
       );
     }
 
-    // 3. Default Status
     if (type === "group") {
       return <Text style={styles.statusText}>Tap for group info</Text>;
     }
@@ -60,6 +68,91 @@ export default function ChatHeader({
         {user?.isOnline ? "Online" : "Offline"}
       </Text>
     );
+  };
+
+  // --- LOGIC TO START CALL  ---
+  const startCallSequence = async (isVideo) => {
+    try {
+      const currentUser = auth.currentUser;
+
+      if (type === "group") {
+        // --- GROUP CALL LOGIC ---
+        const callId = await initiateGroupCall(
+          chatId,
+          isVideo ? "video" : "audio",
+          currentUser
+        );
+
+        navigation.navigate("GroupCallScreen", {
+          roomId: callId,
+          chatId: chatId,
+          userName: user?.displayName || "Group",
+          isVideoCall: isVideo,
+        });
+      } else {
+        // --- CHAT CALL LOGIC ---
+        // 1. Generate a Unique Call ID
+        const callId = `${chatId}_${Date.now()}`;
+
+        // 2. SIGNALING: Update Firestore so the other user sees the call
+        if (chatId) {
+          await setDoc(
+            doc(db, "chats", chatId),
+            {
+              callActive: true,
+              callRoomId: callId,
+              callType: isVideo ? "video" : "audio",
+              callerName: currentUser?.displayName || "User",
+              callerId: currentUser?.uid,
+              callerAvatar: currentUser?.photoURL,
+              callStartTime: serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+
+        // 3. Navigate Local User to the WebRTC Screen
+        navigation.navigate("CallScreen", {
+          roomId: callId,
+          chatId: chatId,
+          isCaller: true,
+          userName: user?.displayName || "User",
+          otherUserAvatar: user?.photoURL,
+          isVideoCall: isVideo,
+        });
+      }
+    } catch (error) {
+      console.error(
+        `Error starting ${isVideo ? "video" : "voice"} call:`,
+        error
+      );
+      Alert.alert("Error", "Failed to start call.");
+    }
+  };
+
+  const handleVideoCall = () => {
+    startCallSequence(true);
+  };
+
+  const startVoiceCall = () => {
+    startCallSequence(false);
+  };
+
+  const handleVoiceCallOptions = () => {
+    Alert.alert("Start Call", "Choose call type", [
+      {
+        text: "Voice Only",
+        onPress: () => startVoiceCall(),
+      },
+      {
+        text: "Video Call",
+        onPress: () => handleVideoCall(),
+      },
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+    ]);
   };
 
   return (
@@ -108,8 +201,14 @@ export default function ChatHeader({
       </TouchableOpacity>
 
       <View style={styles.icons}>
-        <TouchableOpacity style={styles.iconBtn}>
+        <TouchableOpacity style={styles.iconBtn} onPress={handleVideoCall}>
           <MaterialCommunityIcons name="video" size={24} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.iconBtn}
+          onPress={handleVoiceCallOptions}
+        >
+          <MaterialCommunityIcons name="phone" size={24} color="#fff" />
         </TouchableOpacity>
         <TouchableOpacity style={styles.iconBtn} onPress={onMenuPress}>
           <MaterialCommunityIcons name="dots-vertical" size={24} color="#fff" />
@@ -143,8 +242,6 @@ const styles = StyleSheet.create({
     borderColor: "#fff",
   },
   title: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-
-  // Status Styles
   statusRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
   miniAvatar: {
     width: 16,
@@ -154,7 +251,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#fff",
   },
-
   statusText: { color: "#e0e0e0", fontSize: 12 },
   typingText: {
     color: "#fff",
@@ -168,7 +264,6 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
     fontWeight: "bold",
   },
-
   icons: { flexDirection: "row", gap: 15 },
   iconBtn: { padding: 5 },
   groupAvatar: { width: 30, height: 30, borderRadius: 27.5 },
@@ -176,11 +271,11 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 999999,
-    borderWidth:1,
+    borderWidth: 1,
     borderColor: "#fff",
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#f38e8eff",
-    marginRight: 10
+    marginRight: 10,
   },
 });
