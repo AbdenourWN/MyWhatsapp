@@ -1,21 +1,31 @@
 import { CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET } from "@env";
 
-export const uploadToCloudinary = async (uri, type = "image") => {
+export const uploadToCloudinary = async (uri, type = "image", fileName = "upload") => {
   if (!uri) return null;
 
-  const resourceType = type === "audio" ? "video" : "image";
+  // Map app types to Cloudinary resource types
+  // 'image' -> 'image'
+  // 'audio' -> 'video' (Cloudinary treats audio as video)
+  // 'file'  -> 'raw'   (For PDF, DOC, ZIP, etc.)
+  let resourceType = "image";
+  if (type === "audio") resourceType = "video";
+  if (type === "file") resourceType = "raw";
 
   const url = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${resourceType}/upload`;
 
-  let filename = uri.split("/").pop();
-  let match = /\.(\w+)$/.exec(filename);
-  let ext = match ? match[1] : type === "audio" ? "m4a" : "jpg"; // Default extension
-
+  // Determine extension
+  let ext = "jpg";
+  if (fileName) {
+    const parts = fileName.split(".");
+    if (parts.length > 1) ext = parts.pop();
+  }
+  
+  // Create FormData
   let formData = new FormData();
   formData.append("file", {
     uri: uri,
-    name: `upload.${ext}`,
-    type: type === "audio" ? "audio/m4a" : `image/${ext}`,
+    name: fileName || `upload.${ext}`,
+    type: type === "audio" ? "audio/m4a" : (type === "file" ? "*/*" : `image/${ext}`),
   });
   formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
 

@@ -147,6 +147,7 @@ export function useChatLogic(roomId, type) {
           audioDuration: data.audioDuration,
           location: data.location,
           callInfo: data.callInfo,
+          file: data.file,
         };
       });
 
@@ -156,7 +157,7 @@ export function useChatLogic(roomId, type) {
     });
 
     return () => unsub();
-  }, [roomId, limitCount, lastCleared, isMetaDataLoaded]); 
+  }, [roomId, limitCount, lastCleared, isMetaDataLoaded]);
 
   const loadEarlier = () => {
     if (isLoadingEarlier || allMessagesLoaded) return;

@@ -18,6 +18,7 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker"; // <--- 1. NEW IMPORT
 import { Audio } from "expo-av";
 import * as Location from "expo-location";
 import moment from "moment";
@@ -39,10 +40,11 @@ import AudioMessage from "../Components/Chat/AudioMessage";
 import RecordingBar from "../Components/Chat/RecordingBar";
 import TypingIndicator from "../Components/Chat/TypingIndicator";
 import LocationMessage from "../Components/Chat/LocationMessage";
+import FileMessage from "../Components/Chat/FileMessage"; // <--- 2. NEW IMPORT
+import CallMessage from "../Components/Chat/CallMessage";
 
 // Hooks
 import { useChatLogic } from "../hooks/useChatLogic";
-import CallMessage from "../Components/Chat/CallMessage";
 
 export default function Chat({ route, navigation }) {
   const { roomId, otherUser, type } = route.params;
@@ -241,11 +243,19 @@ export default function Chat({ route, navigation }) {
     }
   };
 
-  // --- MEDIA HANDLERS ---
-  const handleUploadAndSend = async (uri, mediaType, audioDuration = 0) => {
+  // --- MEDIA HANDLERS (UPDATED TO HANDLE FILES) ---
+  // The third parameter 'metaData' can be a number (duration) OR an object (file info)
+  const handleUploadAndSend = async (uri, mediaType, metaData = 0) => {
     setIsUploading(true);
     try {
-      const cloudUrl = await uploadToCloudinary(uri, mediaType);
+      // If sending a file, pass the name to cloudinary config to preserve extension
+      const fileName =
+        mediaType === "file" && typeof metaData === "object"
+          ? metaData.name
+          : null;
+
+      const cloudUrl = await uploadToCloudinary(uri, mediaType, fileName);
+
       const msg = {
         _id: Math.random().toString(36).substring(7),
         text: "",
@@ -256,13 +266,29 @@ export default function Chat({ route, navigation }) {
           avatar: auth.currentUser.photoURL,
         },
       };
+
       if (mediaType === "image") msg.image = cloudUrl;
+
       if (mediaType === "audio") {
         msg.audio = cloudUrl;
-        msg.audioDuration = audioDuration;
+        // metaData is audioDuration here
+        msg.audioDuration = typeof metaData === "number" ? metaData : 0;
       }
+
+      // --- 3. NEW: HANDLE FILE MESSAGE ---
+      if (mediaType === "file") {
+        // metaData is an object { name, size } here
+        msg.file = {
+          url: cloudUrl,
+          name: metaData.name || "File",
+          size: metaData.size || 0,
+          ext: metaData.name?.split(".").pop() || "file",
+        };
+      }
+
       sendMessage(roomId, msg, type);
     } catch (error) {
+      console.log(error);
       Alert.alert("Error", "Failed to send media");
     } finally {
       setIsUploading(false);
@@ -285,6 +311,34 @@ export default function Chat({ route, navigation }) {
       quality: 0.7,
     });
     if (!result.canceled) handleUploadAndSend(result.assets[0].uri, "image");
+  };
+
+  // --- 4. NEW: PICK DOCUMENT ---
+  const pickDocument = async () => {
+    setAttachmentVisible(false);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*", // Allow all files
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) return;
+
+      const file = result.assets[0];
+      // 10MB Limit Example
+      if (file.size > 10 * 1024 * 1024) {
+        Alert.alert("Too Large", "File must be under 10MB");
+        return;
+      }
+
+      // Pass file info as 3rd parameter
+      handleUploadAndSend(file.uri, "file", {
+        name: file.name,
+        size: file.size,
+      });
+    } catch (err) {
+      console.log(err);
+    }
   };
 
   // --- RECORDING ---
@@ -365,11 +419,17 @@ export default function Chat({ route, navigation }) {
         <View
           style={[styles.bubble, isMe ? styles.bubbleRight : styles.bubbleLeft]}
         >
+          {/* --- CONTENT SWITCHER --- */}
+
+          {/* 1. Call System Message */}
           {item.callInfo ? (
             <CallMessage item={item} isMe={isMe} />
           ) : (
-            // 2. STANDARD MESSAGES (Text, Image, Audio, Location)
             <>
+              {/* 2. File Message (NEW) */}
+              {item.file && <FileMessage currentMessage={item} isMe={isMe} />}
+
+              {/* 3. Image Message */}
               {item.image && (
                 <TouchableOpacity onPress={() => setSelectedImage(item.image)}>
                   <Image
@@ -380,6 +440,7 @@ export default function Chat({ route, navigation }) {
                 </TouchableOpacity>
               )}
 
+              {/* 4. Audio Message */}
               {item.audio && (
                 <AudioMessage
                   currentMessage={item}
@@ -387,10 +448,12 @@ export default function Chat({ route, navigation }) {
                 />
               )}
 
+              {/* 5. Location Message */}
               {item.location && (
                 <LocationMessage location={item.location} isMe={isMe} />
               )}
 
+              {/* 6. Text Message */}
               {item.text ? (
                 <Text
                   style={[
@@ -596,6 +659,21 @@ export default function Chat({ route, navigation }) {
                 <MaterialCommunityIcons name="image" size={24} color="#fff" />
               </View>
               <Text style={styles.attachText}>Gallery</Text>
+            </TouchableOpacity>
+
+            {/* --- 5. NEW: DOCUMENT PICKER --- */}
+            <TouchableOpacity
+              style={styles.attachmentItem}
+              onPress={pickDocument}
+            >
+              <View style={[styles.attachIcon, { backgroundColor: "#2196F3" }]}>
+                <MaterialCommunityIcons
+                  name="file-document"
+                  size={24}
+                  color="#fff"
+                />
+              </View>
+              <Text style={styles.attachText}>Document</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
