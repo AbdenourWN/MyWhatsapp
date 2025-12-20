@@ -36,16 +36,29 @@ const { width, height } = Dimensions.get("window");
 
 const configuration = {
   iceServers: [
-    {
-      urls: "turn:global.turn.metered.ca:443?transport=tcp",
-      username: "58c6ec9d3449f6a7600ccf90",
-      credential: "FSivOnN8oshmas/X",
-    },
-    {
-      urls: "turn:global.turn.metered.ca:80?transport=tcp",
-      username: "58c6ec9d3449f6a7600ccf90",
-      credential: "FSivOnN8oshmas/X",
-    },
+      {
+        urls: "stun:stun.relay.metered.ca:80",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:80",
+        username: "58c6ec9d3449f6a7600ccf90",
+        credential: "FSivOnN8osHmas/X",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:80?transport=tcp",
+        username: "58c6ec9d3449f6a7600ccf90",
+        credential: "FSivOnN8osHmas/X",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:443",
+        username: "58c6ec9d3449f6a7600ccf90",
+        credential: "FSivOnN8osHmas/X",
+      },
+      {
+        urls: "turns:global.relay.metered.ca:443?transport=tcp",
+        username: "58c6ec9d3449f6a7600ccf90",
+        credential: "FSivOnN8osHmas/X",
+      },
   ],
 };
 
@@ -124,7 +137,7 @@ export default function CallScreen() {
 
           if (state === "connected" && !timerRef.current) {
             timerRef.current = setInterval(() => {
-              // FIX: Update both State (for UI) and Ref (for Logic)
+              
               setDurationSecs((p) => p + 1);
               durationRef.current += 1;
             }, 1000);

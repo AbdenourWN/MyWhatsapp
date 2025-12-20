@@ -7,7 +7,7 @@ import {
   Dimensions,
   FlatList,
   Alert,
-  Image, // Added Image
+  Image,
 } from "react-native";
 import {
   RTCPeerConnection,
@@ -31,7 +31,7 @@ import {
   getDoc,
   serverTimestamp,
   setDoc,
-  runTransaction, // Added setDoc
+  runTransaction,
 } from "firebase/firestore";
 import { sendCallSystemMessage } from "../services/chatServices";
 
@@ -203,7 +203,7 @@ export default function GroupCallScreen() {
     pc.ontrack = (event) => {
       if (event.streams && event.streams[0]) {
         setRemoteStreams((prev) => {
-          // Remove old stream if exists, add new one
+          
           const filtered = prev.filter((p) => p.id !== targetUserId);
           return [...filtered, { id: targetUserId, stream: event.streams[0] }];
         });

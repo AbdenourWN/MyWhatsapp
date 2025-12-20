@@ -7,6 +7,7 @@ import GroupSettings from "../screens/GroupSettings";
 import CallScreen from "../screens/CallScreen";
 import IncomingCallScreen from "../screens/IncomingCallScreen";
 import GroupCallScreen from "../screens/GroupCallScreen";
+import MediaHistory from "../screens/MediaHistory";
 
 const Stack = createStackNavigator();
 
@@ -42,6 +43,11 @@ export default function HomeStack() {
       <Stack.Screen
         name="GroupCallScreen"
         component={GroupCallScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="MediaHistory"
+        component={MediaHistory}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

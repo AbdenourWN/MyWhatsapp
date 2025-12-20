@@ -5,7 +5,7 @@ import { db, auth } from "../firebaseConfig";
 
 const CallListener = () => {
   const navigation = useNavigation();
-  const processedCalls = useRef(new Set()); // Shared set to prevent double-navigation
+  const processedCalls = useRef(new Set()); 
 
   useEffect(() => {
     const user = auth.currentUser;

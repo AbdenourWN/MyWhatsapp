@@ -13,17 +13,18 @@ import {
   TextInput,
   Image,
   StatusBar,
+  ImageBackground,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
-import * as DocumentPicker from "expo-document-picker"; // <--- 1. NEW IMPORT
+import * as DocumentPicker from "expo-document-picker";
 import { Audio } from "expo-av";
 import * as Location from "expo-location";
 import moment from "moment";
 
-import { auth } from "../firebaseConfig";
+import { auth, db } from "../firebaseConfig";
 import { uploadToCloudinary } from "../cloudinaryConfig";
 import {
   sendMessage,
@@ -40,11 +41,12 @@ import AudioMessage from "../Components/Chat/AudioMessage";
 import RecordingBar from "../Components/Chat/RecordingBar";
 import TypingIndicator from "../Components/Chat/TypingIndicator";
 import LocationMessage from "../Components/Chat/LocationMessage";
-import FileMessage from "../Components/Chat/FileMessage"; // <--- 2. NEW IMPORT
+import FileMessage from "../Components/Chat/FileMessage";
 import CallMessage from "../Components/Chat/CallMessage";
 
 // Hooks
 import { useChatLogic } from "../hooks/useChatLogic";
+import { doc, onSnapshot } from "firebase/firestore";
 
 export default function Chat({ route, navigation }) {
   const { roomId, otherUser, type } = route.params;
@@ -74,6 +76,8 @@ export default function Chat({ route, navigation }) {
   const [inputText, setInputText] = useState("");
   const [selectedImage, setSelectedImage] = useState(null);
   const [attachmentVisible, setAttachmentVisible] = useState(false);
+  const [backgroundImage, setBackgroundImage] = useState(null);
+
 
   // Recording State
   const [recording, setRecording] = useState(null);
@@ -85,6 +89,26 @@ export default function Chat({ route, navigation }) {
   const typingTimeoutRef = useRef(null);
   const isTypingRef = useRef(false);
 
+
+   useEffect(() => {
+    const collectionName = type === "group" ? "groups" : "chats";
+    const roomRef = doc(db, collectionName, roomId);
+
+    const unsubscribe = onSnapshot(roomRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.backgroundImage) {
+          setBackgroundImage(data.backgroundImage);
+        } else {
+          setBackgroundImage(null); 
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [roomId, type]);
+
+
   useEffect(() => {
     (async () => await Audio.requestPermissionsAsync())();
     return () => {
@@ -92,12 +116,12 @@ export default function Chat({ route, navigation }) {
     };
   }, []);
 
-  // --- TYPING LOGIC ---
   const handleHeaderPress = () => {
     if (type === "group") {
       navigation.navigate("GroupSettings", { groupId: roomId });
     }
   };
+  // --- TYPING LOGIC ---
 
   const handleTextChange = useCallback(
     async (newText) => {
@@ -167,6 +191,7 @@ export default function Chat({ route, navigation }) {
     ]);
   };
 
+  /* --- MESSAGE HANDLERS --- */
   const handleSend = async () => {
     if (!inputText.trim()) return;
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -189,7 +214,7 @@ export default function Chat({ route, navigation }) {
 
   // --- LOCATION LOGIC ---
   const handleSendLocation = async () => {
-    setAttachmentVisible(false); // Close menu
+    setAttachmentVisible(false);
     setIsUploading(true);
     try {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -243,12 +268,10 @@ export default function Chat({ route, navigation }) {
     }
   };
 
-  // --- MEDIA HANDLERS (UPDATED TO HANDLE FILES) ---
-  // The third parameter 'metaData' can be a number (duration) OR an object (file info)
+  // --- MEDIA HANDLERS ---
   const handleUploadAndSend = async (uri, mediaType, metaData = 0) => {
     setIsUploading(true);
     try {
-      // If sending a file, pass the name to cloudinary config to preserve extension
       const fileName =
         mediaType === "file" && typeof metaData === "object"
           ? metaData.name
@@ -491,7 +514,13 @@ export default function Chat({ route, navigation }) {
   };
 
   return (
-    <View style={styles.container}>
+    <ImageBackground
+      source={
+        backgroundImage ? { uri: backgroundImage } : null
+      }
+      style={styles.container}
+      resizeMode="cover"
+    >
       <ChatHeader
         navigation={navigation}
         user={displayUser}
@@ -502,6 +531,7 @@ export default function Chat({ route, navigation }) {
         onHeaderPress={handleHeaderPress}
         type={type}
       />
+      {!backgroundImage && <View style={styles.defaultBackground} />}
 
       {isLoadingMessages || isClearing ? (
         <View style={styles.center}>
@@ -616,6 +646,17 @@ export default function Chat({ route, navigation }) {
               >
                 <Text style={styles.menuText}>Clear Chat</Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() =>
+                  navigation.navigate("MediaHistory", {
+                    roomId: roomId,
+                    type: type,
+                  })
+                }
+              >
+                <Text style={styles.menuText}>Media History</Text>
+              </TouchableOpacity>
               {type !== "group" && (
                 <TouchableOpacity
                   style={styles.menuItem}
@@ -717,12 +758,17 @@ export default function Chat({ route, navigation }) {
           </TouchableWithoutFeedback>
         </View>
       </Modal>
-    </View>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f2f2f2" },
+  container: { flex: 1 },
+  defaultBackground: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#f2f2f2",
+    zIndex: -1,
+  },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   flatListContent: { paddingVertical: 10, paddingHorizontal: 10 },
   messageRow: {

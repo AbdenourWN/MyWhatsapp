@@ -10,7 +10,6 @@ import {
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
-// 1. Import SAF and Constants from the MAIN package
 import {
   StorageAccessFramework,
   cacheDirectory,
@@ -29,7 +28,7 @@ export default function FileMessage({ currentMessage, isMe }) {
   const handleDownload = async () => {
     setDownloading(true);
     try {
-      // --- ANDROID LOGIC (Save to "Downloads" or user choice) ---
+      // --- ANDROID LOGIC ---
       if (Platform.OS === "android") {
         // 1. Request Permission to access a folder
         const permissions =
@@ -50,7 +49,6 @@ export default function FileMessage({ currentMessage, isMe }) {
         });
 
         // 4. Create the file in the user's chosen folder
-        // infer mimetype from ext or default to octet-stream
         const mimeType = "application/octet-stream";
         const createdUri = await StorageAccessFramework.createFileAsync(
           permissions.directoryUri,
@@ -66,7 +64,7 @@ export default function FileMessage({ currentMessage, isMe }) {
         Alert.alert("Success", "File saved to your selected folder!");
       }
 
-      // --- IOS LOGIC (Save to App Documents) ---
+      // --- IOS LOGIC ---
       else {
         const fileUri = documentDirectory + (file.name || "download.pdf");
         await downloadAsync(file.url, fileUri);

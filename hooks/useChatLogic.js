@@ -20,7 +20,7 @@ export function useChatLogic(roomId, type) {
   const [headerInfo, setHeaderInfo] = useState(null);
 
   // Pagination
-  const [limitCount, setLimitCount] = useState(20);
+  const [limitCount, setLimitCount] = useState(200);
   const [isLoadingEarlier, setIsLoadingEarlier] = useState(false);
   const [allMessagesLoaded, setAllMessagesLoaded] = useState(false);
 
@@ -108,7 +108,6 @@ export function useChatLogic(roomId, type) {
 
   // 2. LISTEN TO MESSAGES
   useEffect(() => {
-    // --- CRITICAL FIX: Stop if metadata isn't ready ---
     if (!isMetaDataLoaded) return;
 
     const messagesRef = collection(db, collectionName, roomId, "messages");

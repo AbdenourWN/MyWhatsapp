@@ -416,3 +416,19 @@ export const joinGroupCall = async (callId, currentUser) => {
     activeParticipants: arrayUnion(currentUser.uid),
   });
 };
+
+
+export const updateChatBackground = async (roomId, backgroundUrl, type) => {
+  try {
+    const collectionName = type === "group" ? "groups" : "chats";
+    const roomRef = doc(db, collectionName, roomId);
+
+    await updateDoc(roomRef, {
+      backgroundImage: backgroundUrl
+    });
+    console.log("Background updated successfully");
+  } catch (error) {
+    console.error("Error updating background:", error);
+    throw error;
+  }
+};
